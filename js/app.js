@@ -6,15 +6,24 @@ import { supabase } from './supabase.js';
 import { sendMagicLink, signOut, resolveHouseholdId, joinHousehold, currentUser } from './auth.js';
 import * as db from './db.js';
 import { parseFile, merchKey } from './parse.js';
+import * as NW from './networth.js';
+import { importV3 } from './migrate.js';
 
-// Where the Spend Router app is deployed (separate repo). Update after you deploy it.
 const ROUTER_URL = 'https://spend-router.netlify.app';
 
 const $ = s => document.querySelector(s);
 const app = $('#app');
-let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set() };
+let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new Set(),
+          holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
+          snapshots:[], tags:[], fx:{}, tax:null, estate:null };
 let catIcon={}, catFlags={}, HHID=null;
+let AREA='home', profile='household';
 let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='';
+// ---- balance-sheet / money helpers ----
+const toSGD=(a,c)=>NW.toSGD(a,c,M.fx);
+const sgd0=n=>'SGD '+Math.round(Math.abs(n)).toLocaleString('en-SG');
+const signed=n=>(n<0?'−':'+')+sgd0(n);
+const valCls=n=>n>0?'val-pos':n<0?'val-neg':'val-neutral';
 
 // ---- format helpers ----
 const money = n => (n<0?'-':'')+'SGD '+Math.abs(Math.round(n*100)/100).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -49,8 +58,8 @@ async function boot(){
 function showError(e){ app.innerHTML=`<div class="center"><div class="card" style="max-width:560px"><h3>Something went wrong</h3><p class="muted">${esc(e&&e.message||e)}</p><button class="btn" onclick="location.reload()">Reload</button></div></div>`; console.error('start error',e); }
 function renderSignIn(){
   app.innerHTML=`<div class="center"><div class="card" style="max-width:420px;text-align:center">
-    <h2 style="margin-top:0">Spend Insights</h2>
-    <p class="muted">Sign in with your email — we'll send a one-tap magic link. Your household (you + wife) shares the same data.</p>
+    <h3 style="margin-top:0">Financial Insights</h3>
+    <p class="muted" style="margin:8px 0 16px">Sign in with your email — we'll send a one-tap magic link. Your household shares the same data.</p>
     <input id="email" type="email" placeholder="you@email.com" style="width:100%;margin:8px 0">
     <button class="btn pri" style="width:100%" onclick="SI.signIn()">Send magic link</button>
     <div id="authmsg" class="muted" style="margin-top:10px"></div>
@@ -86,30 +95,47 @@ async function reload(){
   catIcon={}; catFlags={}; M.cats.forEach(c=>{catIcon[c.name]=c.icon; catFlags[c.name]=c;});
 }
 
+const AREAS=[['home','Home'],['cashflow','Cash Flow'],['wealth','Wealth'],['protection','Protection'],['plan','Plan'],['settings','Settings']];
+const CF_TABS=['overview','insights','transactions','review','import'];
+const mountEl=()=>AREA==='cashflow'?'#cfbody':'#view';
 function renderShell(){
-  const NAV=[['overview','Money in/out'],['insights','Insights'],['transactions','Transactions'],['review','Review'],['import','Import']];
   app.innerHTML=`<div class="top"><div class="topin">
-      <div class="brand">Spend Insights</div>
+      <div class="brand">Financial Insights</div>
       <nav id="nav"></nav>
-      <button class="btn sm" onclick="SI.signOut()">Sign out</button>
+      <div class="topright">
+        <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
+        <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>
+        <button class="btn sm ghost" onclick="SI.signOut()">Sign out</button>
+      </div>
     </div></div>
     <div class="wrap"><div id="view"></div></div>
     <div class="ov" id="ov"><div class="sheet" id="sheet"></div></div>`;
   $('#ov').addEventListener('click',e=>{ if(e.target.id==='ov') closeSheet(); });
-  buildNav(NAV);
+  buildNav();
 }
-function buildNav(NAV){ const rc=M.tx.filter(t=>t.review).length;
-  $('#nav').innerHTML=NAV.map(([t,l])=>`<button class="${TAB===t?'on':''}" onclick="SI.go('${t}')">${l}${t==='review'&&rc?`<span class="badge">${rc}</span>`:''}</button>`).join('');
+function buildNav(){ const rc=M.tx.filter(t=>t.review).length;
+  $('#nav').innerHTML=AREAS.map(([a,l])=>`<button class="${AREA===a?'on':''}" onclick="SI.go('${a}')">${l}${a==='cashflow'&&rc?`<span class="badge">${rc}</span>`:''}</button>`).join('');
 }
-function go(t){ TAB=t; renderShell(); render(); window.scrollTo(0,0); }
+function go(x){
+  if(CF_TABS.includes(x)){ AREA='cashflow'; TAB=x; }
+  else { AREA=x; if(x==='cashflow' && !CF_TABS.includes(TAB)) TAB='overview'; }
+  renderShell(); render(); window.scrollTo(0,0);
+}
+function setProfile(p){ profile=p; render(); }
 
 // ============================ RENDER ============================
 function render(){
-  buildNav([['overview','Money in/out'],['insights','Insights'],['transactions','Transactions'],['review','Review'],['import','Import']]);
-  if(!M.tx.length && TAB!=='import' && TAB!=='review'){ $('#view').innerHTML=empty(); return; }
+  buildNav();
+  ({home:homeView, cashflow:cashflowView, wealth:wealthView, protection:protectionView, plan:planView, settings:settingsView}[AREA]||homeView)();
+}
+function cashflowView(){
+  const rc=M.tx.filter(t=>t.review).length;
+  const sub=[['overview','Money in/out'],['insights','Insights'],['transactions','Transactions'],['review','Review'],['import','Import']];
+  $('#view').innerHTML=`<div class="subnav">${sub.map(([t,l])=>`<button class="${TAB===t?'on':''}" onclick="SI.go('${t}')">${l}${t==='review'&&rc?` · ${rc}`:''}</button>`).join('')}</div><div id="cfbody"></div>`;
+  if(!M.tx.length && TAB!=='import' && TAB!=='review'){ $('#cfbody').innerHTML=empty(); return; }
   ({overview:overviewView,insights:insightsView,transactions:txView,review:reviewView,import:importView}[TAB]||overviewView)();
 }
-const empty=()=>`<div class="card" style="text-align:center;padding:50px"><div style="font-size:40px">📊</div><h3>No data yet</h3><div class="muted" style="margin:6px 0 18px">Import statements to see where your money goes.</div><button class="btn pri" onclick="SI.go('import')">Import statements</button></div>`;
+const empty=()=>`<div class="card" style="text-align:center;padding:44px"><h3>No transactions yet</h3><p class="muted" style="margin:6px 0 18px">Import your statements to see where your money goes.</p><button class="btn pri" onclick="SI.go('import')">Import statements</button></div>`;
 const monthOpts=()=>{const ms=[...new Set(counted().map(t=>t.txn_date.slice(0,7)))].sort().reverse();return `<option value="all">All months</option>`+ms.map(m=>`<option value="${m}" ${month===m?'selected':''}>${fmtMonth(m)}</option>`).join('');};
 const acctOpts=()=>{const ts=[...new Set(counted().map(t=>t.account))];return `<option value="all">All accounts</option>`+ts.map(t=>`<option value="${t}" ${acct===t?'selected':''}>${ACCT(t).label}</option>`).join('');};
 
@@ -134,7 +160,7 @@ function overviewView(){
   latest.forEach(t=>left+=txRow(t)); if(!latest.length)left+=`<div class="muted">No transactions.</div>`;
   left+=`</div></div>`;
   const right=`<div class="card"><h2>Quick insights</h2>${mini(scope,totOut,fcOut)}<button class="btn pri" style="width:100%;margin-top:8px" onclick="SI.go('insights')">See all insights →</button></div>`;
-  $('#view').innerHTML=`<div class="grid gridmain"><div class="grid">${left}</div><div class="grid" style="align-content:start">${right}</div></div>`;
+  $(mountEl()).innerHTML=`<div class="grid gridmain"><div class="grid">${left}</div><div class="grid" style="align-content:start">${right}</div></div>`;
 }
 function mini(scope,totOut,fcOut){const P=scope.filter(isSpend);if(!P.length)return '<div class="muted">Import data for insights.</div>';
   const ES=eligSet();const fxf=P.reduce((s,t)=>s+fxFee(t),0);let elig=0;P.forEach(t=>{if(ES.has(t.category))elig+=t.amount;});const gap=elig*(4-1.6);
@@ -143,7 +169,7 @@ function mini(scope,totOut,fcOut){const P=scope.filter(isSpend);if(!P.length)ret
 
 function insightsView(){
   const P=counted().filter(inScope).filter(isSpend);
-  if(!P.length){$('#view').innerHTML='<div class="card"><div class="muted">No spending in scope. Adjust filters.</div></div>';return;}
+  if(!P.length){$(mountEl()).innerHTML='<div class="card"><div class="muted">No spending in scope. Adjust filters.</div></div>';return;}
   const gross=P.reduce((s,t)=>s+t.amount,0);
   const byMon={};counted().filter(t=>isSpend(t)&&(acct==='all'||t.account===acct)).forEach(t=>byMon[t.txn_date.slice(0,7)]=(byMon[t.txn_date.slice(0,7)]||0)+t.amount);
   const avgMo=Object.keys(byMon).length?Object.values(byMon).reduce((a,b)=>a+b,0)/Object.keys(byMon).length:0;
@@ -177,7 +203,7 @@ function insightsView(){
   h+=`<div class="card"><h2>Recurring — subscriptions & regulars</h2>`;
   if(rec2.length){h+=`<table><thead><tr><th>Merchant</th><th class="num">Months</th><th class="num">Total</th><th class="num">~/mo</th></tr></thead><tbody>`;rec2.slice(0,12).forEach(x=>h+=`<tr><td>${x.m}</td><td class="num">${x.mo.size}</td><td class="num">${money0(x.amt)}</td><td class="num muted">${money0(x.amt/x.mo.size)}</td></tr>`);h+=`</tbody></table>`;}else h+=`<div class="muted">Need a few months of data.</div>`;
   h+=`</div>`;
-  $('#view').innerHTML=h;
+  $(mountEl()).innerHTML=h;
 }
 function rec(cat,v,rows){const fcShare=rows.filter(t=>t.fcy).reduce((s,t)=>s+t.amount,0);
   const A={Groceries:['Move to a 4-mpd card','~1.6 mpd now. HSBC Revolution / Citi Rewards earn 4 mpd online/contactless (≤S$1k/mo).'],Dining:['Move to a 4-mpd card','Online & contactless dining earns 4 mpd.'],Shopping:['Move online spend to 4-mpd card','Online retail is the 4-mpd sweet spot.'],Subscriptions:['Put on a 4-mpd online card','Recurring online charges → 4-mpd card; review unused subs.'],Transport:['4-mpd contactless card','Grab/transit are online/contactless → 4 mpd.'],Travel:['Optimise FX + consider redeeming','Big-ticket & often foreign. Best FCY card or Revolut; consider KrisFlyer/Bonvoy redemption.'],Insurance:['Check card-payable + big-ticket route','Large recurring; weigh CardUp fee vs miles, else GIRO.'],'Utilities/Telco':['GIRO at economy mile value','Platform fees usually beat the miles unless business-class redeemer.'],Education:['Default to GIRO','GIRO wins at economy value.']}[cat]||['Open in Spend Router','Compare routes.'];
@@ -208,19 +234,19 @@ function txView(){
   let last='';rows.slice(0,300).forEach(t=>{if(t.txn_date!==last){h+=`<div class="daygroup">${dfull(t.txn_date)}</div>`;last=t.txn_date;}h+=txRow(t);});
   if(!rows.length)h+=`<div class="muted" style="padding:20px 0">No transactions match.</div>`;
   if(rows.length>300)h+=`<div class="muted" style="margin-top:10px">Showing 300 of ${rows.length}.</div>`;
-  h+=`</div>`;$('#view').innerHTML=h;
+  h+=`</div>`;$(mountEl()).innerHTML=h;
 }
 
 function reviewView(){
   const rows=M.tx.filter(t=>t.review).sort((a,b)=>b.amount-a.amount);
   let h=`<div class="card"><h2>Review queue</h2>`;
-  if(!rows.length){h+=`<div class="flag good"><span class="ic2">✓</span><span>Nothing to review. Best-effort imports (unrecognized formats, reverted/pending) land here for you to confirm before they count.</span></div></div>`;$('#view').innerHTML=h;return;}
+  if(!rows.length){h+=`<div class="flag good"><span class="ic2">✓</span><span>Nothing to review. Best-effort imports (unrecognized formats, reverted/pending) land here for you to confirm before they count.</span></div></div>`;$(mountEl()).innerHTML=h;return;}
   const tot=rows.reduce((s,t)=>s+t.amount,0);
   h+=`<div class="muted" style="margin-bottom:12px">${rows.length} rows (${money0(tot)}) <b>excluded from totals</b> until approved. Fix the category, then approve. Choices are remembered for the merchant.</div>
     <button class="btn pri" onclick="SI.approveAll()">Approve all</button> <button class="btn danger" onclick="SI.deleteReview()">Delete all</button>
     <table style="margin-top:14px"><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead><tbody>`;
   rows.forEach(t=>h+=`<tr><td class="muted" style="white-space:nowrap">${t.txn_date}</td><td>${esc(t.raw||t.merchant||'')}${t.fcy?` <span class="chip fc">${t.fcy_cur}</span>`:''}</td><td>${catSelect(t.id,t.category)}</td><td class="num">${money(t.amount)}</td><td style="white-space:nowrap"><button class="btn sm pri" onclick="SI.approve('${t.id}')">Approve</button> <button class="btn sm" onclick="SI.open('${t.id}')">Details</button></td></tr>`);
-  h+=`</tbody></table></div>`;$('#view').innerHTML=h;
+  h+=`</tbody></table></div>`;$(mountEl()).innerHTML=h;
 }
 
 // ---- category select + management ----
@@ -256,7 +282,7 @@ const closeSheet=()=>$('#ov').classList.remove('show');
 
 // ---- import ----
 function importView(){
-  $('#view').innerHTML=`<div class="card"><h2>Import statements</h2>
+  $(mountEl()).innerHTML=`<div class="card"><h2>Import statements</h2>
     <div class="muted" style="margin-bottom:14px">Connect the <b>transactions/</b> folder once; each subfolder (credit/debit/revolut) is an account. Press Done — only new files import. Or drop files manually. Card numbers are masked before anything is saved.</div>
     <div class="filters"><button class="btn" onclick="SI.connect()">📂 Connect transactions folder</button><button class="btn pri" onclick="SI.scan()">✓ Done — scan for new files</button><span class="status" id="folderStatus">${DIRNAME?'Connected: '+DIRNAME:''}</span></div>
     <div class="muted" style="margin:16px 0 8px">or drop files manually</div>
@@ -276,13 +302,23 @@ function logLine(h){const l=$('#log');if(!l)return;l.style.display='block';l.ins
 // apply learned rules + aliases, prep rows for insert
 function prep(rows){return rows.map(r=>{let cat=M.rules[r.merchant]||r.category;cat=aliased(cat);return {...r,category:cat};});}
 async function importText(text,name,type){const key=type+'/'+name;
-  if(M.files.has(key)){logLine(`<span class="muted">• ${key}: already imported</span>`);return 0;}
+  if(M.files.has(key)){logLine(`<span class="muted">• ${key}: already imported (filename)</span>`);return 0;}
+  const hash=await db.sha256(text);
+  if(M.fileHashes.has(hash)){logLine(`<span class="muted">• ${key}: identical file already imported (content hash) — skipped</span>`);return 0;}
   let r;try{r=parseFile(text);}catch(e){logLine(`<span class="err">✗ ${key}: ${e.message}</span>`);return 0;}
   if(!r.rows.length){logLine(`<span class="err">✗ ${key}: no usable rows</span>`);return 0;}
-  const payload=prep(r.rows).map(row=>({...row,account:type,file:name}));
-  try{ await db.insertTransactions(payload); await db.recordImported(type,name); M.files.add(key); }
+  // duplicate protection: fingerprint against existing txns + overlapping-period check
+  const seen=new Set(M.tx.map(t=>db.fingerprint(t)));
+  const acctDates=M.tx.filter(t=>t.account===type).map(t=>t.txn_date);
+  const payload=prep(r.rows).map(row=>{const t={...row,account:type,file:name}; t.fingerprint=db.fingerprint(t);
+    if(seen.has(t.fingerprint)){ t.review=true; t.flag='duplicate'; } return t;});
+  const dups=payload.filter(t=>t.flag==='duplicate').length;
+  // overlap warning
+  if(acctDates.length){ const lo=payload.reduce((m,t)=>t.txn_date<m?t.txn_date:m,payload[0].txn_date), hi=payload.reduce((m,t)=>t.txn_date>m?t.txn_date:m,payload[0].txn_date);
+    const overlap=acctDates.some(d=>d>=lo&&d<=hi); if(overlap) logLine(`<span style="color:var(--warn)">⚠ ${key}: date range overlaps an earlier ${type} import — probable duplicates flagged for Review.</span>`); }
+  try{ await db.insertTransactions(payload); await db.recordImported(type,name,hash); M.files.add(key); M.fileHashes.add(hash); }
   catch(e){ logLine(`<span class="err">✗ ${key}: DB error ${e.message}</span>`); return 0; }
-  logLine(`<span class="ok">✓ ${key}: ${payload.length} txns (${r.rows[0].src})${r.confident?'':' <b style="color:var(--orange)">⚠ needs review</b>'}</span>`);return payload.length;}
+  logLine(`<span class="ok">✓ ${key}: ${payload.length} txns (${r.rows[0].src})${dups?` · <b style="color:var(--warn)">${dups} probable duplicates → Review</b>`:''}${r.confident?'':' <b style="color:var(--warn)">⚠ needs review</b>'}</span>`);return payload.length;}
 async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
   let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);await finishImport(a);}
 async function finishImport(a){logLine(`<b>Done.</b> ${a} new.`);await reload();render();/* re-render import view to keep log */ if(TAB==='import'){/*keep log visible*/}}
@@ -312,12 +348,130 @@ async function del(id){await db.deleteTransaction(id);await reload();closeSheet(
 async function approve(id,close){await db.patchTransaction(id,{review:false});await reload();if(close)closeSheet();render();}
 async function approveAll(){await db.approveAllReview();await reload();render();}
 async function deleteReview(){if(confirm('Delete all review-queue rows?')){await db.deleteWhereReview();await reload();render();}}
-async function clearAll(){if(confirm('Clear ALL transactions for the household? (Categories kept.)')){await db.clearAllTransactions();M.files=new Set();await reload();render();}}
+async function clearAll(){if(confirm('Clear ALL transactions for the household? (Categories kept.)')){await db.clearAllTransactions();M.files=new Set();M.fileHashes=new Set();await reload();render();}}
+function exportCSV(){ const head='date,amount,direction,category,account,merchant\n';
+  const body=M.tx.map(t=>`${t.txn_date},${t.amount},${t.direction},${t.category},${t.account},"${(t.merchant||'').replace(/"/g,'')}"`).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([head+body],{type:'text/csv'})); a.download='transactions.csv'; a.click(); }
 
 // ---- routing handoff ----
 const catToRouter=c=>({Groceries:'groceries',Dining:'dining',Shopping:'online',Subscriptions:'online',Transport:'groceries','Utilities/Telco':'utilities',Education:'education'}[c]||'general');
 function routeTx(id){const t=M.tx.find(x=>x.id===id);if(!t)return;const p=new URLSearchParams({mode:'earn',amt:t.amount,cat:catToRouter(t.category),cur:t.fcy?'fcy':'sgd'});window.open(ROUTER_URL+'/?'+p,'_blank');}
 function routeCat(cat,amt,fcy){const p=new URLSearchParams({mode:'earn',amt,cat:catToRouter(cat),cur:fcy?'fcy':'sgd'});window.open(ROUTER_URL+'/?'+p,'_blank');}
+
+// ============================ BALANCE-SHEET AREAS ============================
+const pf=items=>NW.byProfile(items||[],profile);
+const kpi=(l,v,s,cls='')=>`<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
+const freshPill=asOf=>{const f=NW.dataFreshness(asOf);const c=f.status==='old'?'neg':f.status==='stale'?'warn':'ok';return `<span class="age age-${c}">${f.label}</span>`;};
+const RAMP=['var(--accent)','var(--accent-2)','var(--accent-3)','var(--accent-4)','var(--ink-3)','var(--hairline)'];
+
+function homeView(){
+  if(!M.holdings.length && !M.tx.length){ $('#view').innerHTML=`<div class="card" style="text-align:center;padding:44px"><h3>Welcome to your financial command centre</h3><p class="muted" style="margin:6px 0 18px">Import your investments &amp; insurance (Settings → Import v3 data) and your statements (Cash Flow → Import) to light this up.</p><button class="btn pri" onclick="SI.go('settings')">Import my data</button></div>`; return; }
+  const nw=NW.netWorth(M,profile);
+  const alloc=Object.entries(NW.wealthByCategory(M.holdings,profile,M.fx)).sort((a,b)=>b[1]-a[1]);
+  const fl=NW.flags(M,profile);
+  const cover=NW.coverTotals(M.policies,profile,M.fx);
+  const goals=pf(M.goals).filter(g=>g.target);
+  const months=[...new Set(counted().map(t=>t.txn_date.slice(0,7)))].sort();
+  const lm=months[months.length-1];
+  const mt=lm?counted().filter(t=>t.txn_date.slice(0,7)===lm):[];
+  const inn=mt.filter(t=>t.direction==='in'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const out=mt.filter(t=>t.direction==='out'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const save= inn? Math.round((inn-out)/inn*100):null;
+  const topAlloc=alloc[0], topPct=nw.holdings?Math.round(topAlloc?.[1]/nw.holdings*100):0;
+
+  let h=`<div class="pagehead"><h1>${profile==='tanmay'?'Mine':profile==='urvi'?"Urvi's":'Household'}</h1><p class="muted">Your position at a glance — reviewed periodically, pivoted deliberately.</p></div>`;
+  h+=`<div class="kpis">
+    ${kpi('Net worth', sgd0(nw.total), `${sgd0(nw.holdings)} invested`)}
+    ${kpi('Savings rate', save==null?'—':save+'%', lm?`${fmtMonth(lm)} · in ${sgd0(inn)} / out ${sgd0(out)}`:'import statements')}
+    ${kpi('Cash', sgd0(nw.cash), nw.debt?`debt ${sgd0(nw.debt)}`:'')}
+    ${kpi('Life cover', sgd0(cover.death), `CI ${sgd0(cover.ci)}`)}
+  </div>`;
+  // flags
+  if(fl.length){ h+=`<div class="card"><h2>Flags</h2>${fl.map(f=>`<div class="flagline"><span class="dot dot-${f.severity==='danger'?'danger':f.severity==='warn'?'warn':'ok'}"></span><span><b>${f.title}.</b> ${f.detail}</span></div>`).join('')}</div>`; }
+  // allocation
+  if(alloc.length){ h+=`<div class="card"><h2>Wealth allocation</h2>${allocBars(alloc, nw.holdings)}
+    ${topPct>40?`<p class="caption" style="margin-top:10px">● <span class="val-neg">${topAlloc[0]}</span> is ${topPct}% of invested wealth — concentration to watch.</p>`:''}</div>`; }
+  // goals
+  if(goals.length){ h+=`<div class="card"><h2>Goals</h2>${goals.map(g=>goalBar(g)).join('')}</div>`; }
+  // net worth trend
+  h+=`<div class="card"><h2>Net-worth trend</h2>${trendNW(M.snapshots)}</div>`;
+  $('#view').innerHTML=h;
+}
+function allocBars(entries,total){ const max=entries[0][1]||1;
+  return entries.map(([c,v],i)=>`<div class="bar-row"><div class="bar-l">${c}</div><div class="barbg"><div class="bar" style="width:${v/max*100}%;background:${RAMP[i%RAMP.length]}"></div></div><div class="bar-v">${sgd0(v)} <span class="muted">${pct(v,total)}%</span></div></div>`).join(''); }
+function goalBar(g){ const cur=NW.goalCurrentSGD(g,M.holdings,M.fx); const p=g.target?Math.min(100,cur/g.target*100):0;
+  return `<div class="bar-row"><div class="bar-l">${esc(g.name)}</div><div class="barbg"><div class="bar" style="width:${p}%"></div></div><div class="bar-v">${sgd0(cur)} / ${sgd0(g.target)} <span class="muted">${Math.round(p)}%</span></div></div>`; }
+function trendNW(snaps){ const s=snaps.slice().sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
+  if(s.length<2) return `<p class="muted">One snapshot so far (${s.length?sgd0(s[0].net_worth_sgd):'—'}). Snapshots are taken monthly — the trend line appears once there are two.</p>`;
+  const W=640,H=180,pad=30,max=Math.max(...s.map(x=>x.net_worth_sgd)),min=Math.min(...s.map(x=>x.net_worth_sgd));
+  const x=i=>pad+i*(W-2*pad)/(s.length-1), y=v=>H-pad-((v-min)/((max-min)||1))*(H-2*pad);
+  const pts=s.map((p,i)=>`${x(i)},${y(p.net_worth_sgd)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${s.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.net_worth_sgd)}" r="${i===s.length-1?4:3}" fill="var(--accent)"/>`).join('')}</svg>`; }
+
+function wealthView(){
+  const nw=NW.netWorth(M,profile);
+  const hs=pf(M.holdings).sort((a,b)=>toSGD(b.value_local,b.currency)-toSGD(a.value_local,a.currency));
+  let h=`<div class="pagehead"><h1>Wealth</h1></div>
+    <div class="kpis">${kpi('Net worth',sgd0(nw.total))}${kpi('Investments',sgd0(nw.holdings))}${kpi('Cash',sgd0(nw.cash))}${kpi('Property equity',sgd0(nw.realEstate))}</div>`;
+  h+=`<div class="card"><h2>Investments</h2><table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>As of</th></tr></thead><tbody>`;
+  hs.forEach(hd=>{ const v=toSGD(hd.value_local,hd.currency); const si=NW.sinceInception(hd,M.fx);
+    h+=`<tr><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''} ${hd.currency!=='SGD'?'· '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
+      <td class="caption">${hd.owner}</td><td class="num">${sgd0(v)}</td>
+      <td class="num ${si?valCls(si.gain):''}">${si?signed(si.gain)+' · '+(si.pct>=0?'+':'')+si.pct.toFixed(0)+'%':'—'}</td>
+      <td>${freshPill(hd.as_of)}</td></tr>`; });
+  h+=`</tbody></table></div>`;
+  if(pf(M.liabilities).length){ h+=`<div class="card"><h2>Liabilities</h2><table><tbody>`+pf(M.liabilities).map(l=>`<tr><td>${esc(l.name||l.liability_type)}</td><td class="num val-neg">−${sgd0(toSGD(l.outstanding,l.currency))}</td></tr>`).join('')+`</tbody></table></div>`; }
+  $('#view').innerHTML=h;
+}
+
+function protectionView(){
+  const cov=NW.coverTotals(M.policies,profile,M.fx);
+  const ps=pf(M.policies);
+  let h=`<div class="pagehead"><h1>Protection</h1></div>
+    <div class="kpis">${kpi('Death',sgd0(cov.death))}${kpi('Critical illness',sgd0(cov.ci))}${kpi('TPD',sgd0(cov.tpd))}${kpi('Hospitalisation',sgd0(cov.hospital))}</div>`;
+  h+=`<div class="card"><h2>Policies</h2><table><thead><tr><th>Policy</th><th>Owner</th><th>Type</th><th class="num">Cover</th><th class="num">Premium/yr</th></tr></thead><tbody>`;
+  ps.forEach(p=>{ const c=p.covers||{}; const main=Math.max(c.death||0,c.ci||0,c.hospital||0); const prem=NW.toSGD(p.premium_freq==='monthly'?(p.premium*12):p.premium,p.premium_currency,M.fx);
+    h+=`<tr><td>${esc(p.insurer)} <span class="muted">${esc(p.product||'')}</span></td><td class="caption">${p.owner}</td><td class="caption">${p.type}</td><td class="num">${sgd0(toSGD(main,p.currency))}</td><td class="num">${prem?sgd0(prem):'—'}</td></tr>`; });
+  h+=`</tbody></table><p class="caption muted" style="margin-top:8px">Employer (SAP) group cover lapses on leaving — see Plan → Scenarios.</p></div>`;
+  $('#view').innerHTML=h;
+}
+
+function planView(){
+  const goals=pf(M.goals).filter(g=>g.target);
+  let h=`<div class="pagehead"><h1>Plan</h1></div>`;
+  h+=`<div class="card"><h2>Goals</h2>${goals.length?goals.map(g=>goalBar(g)).join(''):'<p class="muted">No goals yet.</p>'}</div>`;
+  h+=`<div class="card"><h2>Scenarios</h2><p class="muted">FIRE / Coast-FIRE, retirement readiness, and the <b>“what if I leave SAP”</b> stress test (salary + SAP stock + group insurance) arrive in Phase 8. Natural-language “Ask” lands in Phase 9.</p></div>`;
+  if(M.tax){ h+=`<div class="card"><h2>Tax &amp; SRS</h2><p>SRS cap ${sgd0(M.tax.srs_cap||35700)}${M.tax.srs_contributed_ytd!=null?` · contributed ${sgd0(M.tax.srs_contributed_ytd)}`:''}. <span class="muted">${esc(M.tax.notes||'')}</span></p></div>`; }
+  if(M.estate){ const e=M.estate; const item=(ok,l)=>`<div class="flagline"><span class="dot dot-${ok?'ok':'danger'}"></span><span>${l}</span></div>`;
+    h+=`<div class="card"><h2>Estate</h2>${item(e.will_sg,'SG will')}${item(e.will_india,'India will')}${item(e.guardianship_documented,'Guardianship documented')}${item(e.beneficiaries_checked,'Beneficiaries checked')}<p class="caption muted" style="margin-top:6px">${esc(e.notes||'')}</p></div>`; }
+  $('#view').innerHTML=h;
+}
+
+function settingsView(){
+  const p=M.profiles||{};
+  let h=`<div class="pagehead"><h1>Settings</h1></div>`;
+  h+=`<div class="card"><h2>Import v3 data</h2><p class="muted" style="margin-bottom:12px">Load your <code>finance-framework-state.json</code> export — holdings, policies, goals, tax, estate, snapshots. Replaces existing balance-sheet data.</p><button class="btn pri" onclick="SI.importV3()">Choose JSON file…</button></div>`;
+  h+=`<div class="card"><h2>Profiles</h2><table><tbody>${Object.entries(p).map(([k,v])=>`<tr><td>${esc(v.name||k)}</td><td class="caption muted">${esc(v.residency||'')}${v.employer?' · '+esc(v.employer):''}</td></tr>`).join('')||'<tr><td class="muted">Imported with your v3 data.</td></tr>'}</tbody></table></div>`;
+  h+=`<div class="card"><h2>FX rates (SGD per unit)</h2><table><tbody>${Object.entries(M.fx).map(([k,v])=>`<tr><td>${k.replace('_SGD','')}</td><td class="num mono">${v}</td></tr>`).join('')}</tbody></table><p class="caption muted" style="margin-top:6px">Editable rates come in a later pass; imported from v3 for now.</p></div>`;
+  h+=`<div class="card"><h2>Appearance</h2><button class="btn" onclick="SI.theme()">Toggle ${document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'} mode</button></div>`;
+  h+=`<div class="card"><h2>Data</h2><button class="btn" onclick="SI.exportCsv()">Export transactions CSV</button> <button class="btn danger" onclick="SI.clearAll()">Clear all transactions</button></div>`;
+  $('#view').innerHTML=h;
+}
+async function importV3Pick(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; let j; try{ j=JSON.parse(await f.text()); }catch(e){ alert('Not valid JSON.'); return; }
+    if(!confirm('Import v3 data? This replaces existing balance-sheet data (holdings, policies, goals, etc.).')) return;
+    try{ const c=await importV3(j,{replace:true}); await reload(); AREA='home'; render(); toast(`Imported: ${c.holdings} holdings · ${c.policies} policies · ${c.goals} goals`); }
+    catch(e){ alert('Import failed: '+e.message); } };
+  inp.click();
+}
+
+// ---- theme ----
+function currentTheme(){ return document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'); }
+function applyTheme(){ const t=localStorage.getItem('fi_theme') || (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'); document.documentElement.setAttribute('data-theme',t); }
+function themeIcon(){ return currentTheme()==='dark'
+  ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>`
+  : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`; }
+function toggleTheme(){ const next=currentTheme()==='dark'?'light':'dark'; document.documentElement.setAttribute('data-theme',next); localStorage.setItem('fi_theme',next); renderShell(); render(); }
 
 // ---- misc ----
 function toast(m){let e=$('#toast');if(!e){e=document.createElement('div');e.id='toast';document.body.appendChild(e);}e.textContent=m;e.className='show';clearTimeout(e._t);e._t=setTimeout(()=>e.className='',2200);}
@@ -328,9 +482,11 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');},
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, del, approve, approveAll, deleteReview, clearAll,
-  connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat };
+  connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
+  setProfile, theme:toggleTheme, importV3:importV3Pick, exportCsv:exportCSV };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };
 
+applyTheme();
 boot();

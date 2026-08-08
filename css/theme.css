@@ -1,8 +1,36 @@
+/* "Quiet" theme — Apple-like calm system. Tokens + base + dark mode. */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap');
+
 :root{
-  --bg:#fff; --bg2:#f5f5f7; --card:#fff; --txt:#1d1d1f; --txt2:#6e6e73; --line:#e3e3e6;
-  --accent:#0071e3; --accent-d:#0058b9; --green:#34c759; --red:#ff3b30; --orange:#ff9500; --purple:#af52de;
-  --fc-bg:#fff3e6; --radius:18px; --shadow:0 4px 22px rgba(0,0,0,.05);
+  --bg:#fbfbfd; --surface:#ffffff; --surface-sunken:#f2f2f5;
+  --ink:#1d1d1f; --ink-2:#56565b; --ink-3:#86868b; --hairline:#e3e3e7;
+  --accent:#2f6fb2; --accent-hover:#2a6199; --accent-press:#235489; --accent-tint:#eaf1f9; --accent-ink:#1f4c7a;
+  --accent-2:#6b9bcb; --accent-3:#9dbfdf; --accent-4:#cfe0f0;   /* chart ramp */
+  --ok:#2c7a54; --warn:#9a6a12; --danger:#b3261e;
+  --pos:#15653f; --neg:#9b1c1c;                                  /* money direction — deep */
+  --hl-purple:#6f2dbd; --hl-pink:#c2185b; --hl-navy:#1b3a8f;
+  --font:"Geist",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --font-mono:"Geist Mono","SF Mono",ui-monospace,Menlo,monospace;
+  --r-sm:8px; --r-md:12px; --r-lg:18px; --r-pill:999px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.05); --shadow-md:0 4px 16px rgba(0,0,0,.07); --shadow-lg:0 16px 48px rgba(0,0,0,.12);
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --surface:#1c1c1e; --surface-sunken:#2c2c2e;
+  --ink:#f5f5f7; --ink-2:#a1a1a6; --ink-3:#6e6e73; --hairline:#333336;
+  --accent:#4c92dd; --accent-hover:#63a2e6; --accent-press:#3f82c8; --accent-tint:#17263a; --accent-ink:#8cbdec;
+  --accent-2:#3f79ad; --accent-3:#345f84; --accent-4:#28455f;
+  --ok:#4fae86; --warn:#d6a24a; --danger:#e0655c;
+  --pos:#46a67d; --neg:#d1655c;
+  --shadow-sm:none; --shadow-md:0 4px 16px rgba(0,0,0,.4); --shadow-lg:0 16px 48px rgba(0,0,0,.6);
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:var(--bg2);color:var(--txt);font:16px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  transition:background-color .2s ease,color .2s ease}
+h1,h2,h3{text-wrap:balance;margin:0}
+p{text-wrap:pretty}
+a{color:var(--accent);text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+::selection{background:var(--accent-tint)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

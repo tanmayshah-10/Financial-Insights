@@ -18,23 +18,54 @@ const DEFAULT_CATS = [
   ['Uncategorized','❓',false,false],
 ];
 
+const q = (t,cols='*')=>supabase.from(t).select(cols).eq('household_id',HH);
 export async function loadAll(){
-  const [tx, cats, rules, files, aliases] = await Promise.all([
-    supabase.from('transactions').select('*').eq('household_id',HH).order('txn_date',{ascending:false}),
-    supabase.from('categories').select('*').eq('household_id',HH).order('sort'),
-    supabase.from('rules').select('*').eq('household_id',HH),
-    supabase.from('imported_files').select('account,filename').eq('household_id',HH),
-    supabase.from('category_aliases').select('from_name,to_name').eq('household_id',HH),
+  const [tx, cats, rules, files, aliases,
+         holdings, policies, goals, realEstate, cashAccounts, liabilities,
+         settings, taxState, estateState, snapshots, tags] = await Promise.all([
+    q('transactions').order('txn_date',{ascending:false}),
+    q('categories').order('sort'), q('rules'),
+    supabase.from('imported_files').select('account,filename,content_hash').eq('household_id',HH),
+    q('category_aliases','from_name,to_name'),
+    q('holdings'), q('policies'), q('goals'), q('real_estate'), q('cash_accounts'), q('liabilities'),
+    q('household_settings').maybeSingle(), q('tax_state').maybeSingle(), q('estate_state').maybeSingle(),
+    q('snapshots').order('created_at'), q('tags'),
   ]);
   let categories = cats.data || [];
-  if (!categories.length) categories = await seedCategories();     // fallback if trigger didn't seed
+  if (!categories.length) categories = await seedCategories();
+  const s = settings.data || {};
   return {
     tx: tx.data || [],
     cats: categories,
     rules: Object.fromEntries((rules.data||[]).map(r=>[r.merchant_key, r.category_name])),
     aliases: Object.fromEntries((aliases.data||[]).map(a=>[a.from_name, a.to_name])),
     files: new Set((files.data||[]).map(f=>f.account+'/'+f.filename)),
+    fileHashes: new Set((files.data||[]).map(f=>f.content_hash).filter(Boolean)),
+    holdings: holdings.data||[], policies: policies.data||[], goals: goals.data||[],
+    realEstate: realEstate.data||[], cashAccounts: cashAccounts.data||[], liabilities: liabilities.data||[],
+    snapshots: snapshots.data||[], tags: tags.data||[],
+    fx: s.fx || {USD_SGD:1.275,EUR_SGD:1.47,INR_SGD:0.0156,GBP_SGD:1.72},
+    profiles: s.profiles || {}, kids: s.kids || [], emergencyMonths: s.emergency_fund_months ?? 6,
+    tax: taxState.data || null, estate: estateState.data || null,
   };
+}
+
+// ---- generic helpers for the v3 importer + balance-sheet CRUD ----
+export async function insertRows(table, rows){
+  if(!rows || !rows.length) return [];
+  const payload = rows.map(r=>({...r, household_id:HH}));
+  const { data, error } = await supabase.from(table).insert(payload).select();
+  if(error) throw error; return data||[];
+}
+export async function upsertSingle(table, row){
+  const { error } = await supabase.from(table).upsert({...row, household_id:HH},{onConflict:'household_id'});
+  if(error) throw error;
+}
+export async function upsertSettings(row){ return upsertSingle('household_settings', row); }
+export async function wipeBalanceSheet(){
+  for(const t of ['holdings','policies','goals','real_estate','cash_accounts','liabilities','snapshots','tags']){
+    await supabase.from(t).delete().eq('household_id',HH);
+  }
 }
 
 async function seedCategories(){
@@ -97,7 +128,13 @@ export async function renameCategory(oldName, newName){
   await supabase.from('category_aliases').update({to_name:newName}).eq('household_id',HH).eq('to_name',oldName);
 }
 
-// ---- imported files ----
-export async function recordImported(account, filename){
-  await supabase.from('imported_files').upsert({household_id:HH,account,filename},{onConflict:'household_id,account,filename'});
+// ---- imported files + duplicate protection ----
+export async function recordImported(account, filename, contentHash){
+  await supabase.from('imported_files').upsert({household_id:HH,account,filename,content_hash:contentHash||null},{onConflict:'household_id,account,filename'});
 }
+// SHA-256 of file text → hex (catches the same statement re-uploaded even if renamed)
+export async function sha256(text){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+export function fingerprint(t){ return [t.account,t.txn_date,t.amount,t.direction,t.merchant].join('|'); }
