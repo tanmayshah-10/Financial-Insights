@@ -68,7 +68,7 @@ async function boot(){
 function showError(e){ app.innerHTML=`<div class="center"><div class="card" style="max-width:560px"><h3>Something went wrong</h3><p class="muted">${esc(e&&e.message||e)}</p><button class="btn" onclick="location.reload()">Reload</button></div></div>`; console.error('start error',e); }
 function renderSignIn(){
   app.innerHTML=`<div class="center"><div class="card" style="max-width:420px;text-align:center">
-    <h3 style="margin-top:0">Financial Insights</h3>
+    <h3 style="margin-top:0">Shah Financial Insights</h3>
     <p class="muted" style="margin:8px 0 16px">Sign in with your email — we'll send a one-tap magic link. Your household shares the same data.</p>
     <input id="email" type="email" placeholder="you@email.com" style="width:100%;margin:8px 0">
     <button class="btn pri" style="width:100%" onclick="SI.signIn()">Send magic link</button>
@@ -109,11 +109,9 @@ const AREAS=[['home','Home'],['cashflow','Cash Flow'],['wealth','Wealth'],['prot
 const CF_TABS=['overview','insights','transactions','review','import'];
 const mountEl=()=>AREA==='cashflow'?'#cfbody':'#view';
 function renderShell(){
-  const netw = M.holdings?.length ? NW.netWorth(M,'household').total : 0;
   app.innerHTML=`<div class="top"><div class="topin">
-      <div class="brand"><span class="brand-mark"></span>Financial Insights</div>
+      <div class="brand"><span class="brand-mark"></span>Shah Financial Insights</div>
       <nav id="nav"></nav>
-      ${netw?`<div class="nw-chip"><span>Net worth</span><b>${sgd0(netw)}</b></div>`:''}
       <div class="topright">
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
         <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>

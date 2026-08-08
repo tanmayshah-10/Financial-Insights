@@ -1,6 +1,6 @@
 {
-  "name": "Spend Insights",
-  "short_name": "Insights",
+  "name": "Shah Financial Insights",
+  "short_name": "Shah Finance",
   "description": "See where your money goes across credit, debit and Revolut — and how to earn/redeem miles better.",
   "start_url": "./index.html",
   "display": "standalone",
