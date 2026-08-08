@@ -45,6 +45,7 @@ export async function loadAll(){
     realEstate: realEstate.data||[], cashAccounts: cashAccounts.data||[], liabilities: liabilities.data||[],
     snapshots: snapshots.data||[], tags: tags.data||[], accounts: accounts.data||[], valuations: valuations.data||[], positions: positions.data||[],
     fx: s.fx || {USD_SGD:1.275,EUR_SGD:1.47,INR_SGD:0.0156,GBP_SGD:1.72},
+    balances: s.balances || {},
     profiles: s.profiles || {}, kids: s.kids || [], emergencyMonths: s.emergency_fund_months ?? 6,
     tax: taxState.data || null, estate: estateState.data || null,
   };
@@ -62,6 +63,11 @@ export async function upsertSingle(table, row){
   if(error) throw error;
 }
 export async function upsertSettings(row){ return upsertSingle('household_settings', row); }
+// merge statement-derived balances into the settings row without touching fx/profiles/etc.
+export async function setBalances(balances){
+  const { error } = await supabase.from('household_settings').upsert({household_id:HH, balances},{onConflict:'household_id'});
+  if(error) throw error;
+}
 export async function wipeBalanceSheet(){
   for(const t of ['holdings','policies','goals','real_estate','cash_accounts','liabilities','snapshots','tags']){
     await supabase.from(t).delete().eq('household_id',HH);

@@ -45,6 +45,29 @@ function mk(o){const fc=o.fcy?extractFC(o.desc):null;
 function rtfToText(s){s=s.replace(/\{\\(?:fonttbl|colortbl|\*\\expandedcolortbl)[\s\S]*?\}/g,'');s=s.replace(/\\'[0-9a-fA-F]{2}/g,'');s=s.replace(/\\[a-zA-Z]+-?\d* ?/g,'');s=s.replace(/[{}]/g,'');s=s.replace(/\\\r?\n/g,'\n');return s.trim();}
 
 const deq=l=>l.replace(/"/g,'');   // strip CSV quotes so header detection works on both old and new DBS exports
+
+// Pull the current balance out of a statement header:
+//   cash (debit/savings): Available / Ledger Balance
+//   card (credit): outstanding = Credit Limit − Available Limit
+function extractBalance(text){
+  const L=text.split(/\r?\n/).slice(0,18).map(deq);
+  const grab=re=>{for(const l of L){const m=l.match(re);if(m)return m[1];}return null;};
+  const amt=s=>{if(s==null)return null;const n=parseFloat(String(s).replace(/[^0-9.\-]/g,''));return isNaN(n)?null:n;};
+  const ccy=s=>{const m=(s||'').match(/\b([A-Z]{3})\b/);return m?m[1]:'SGD';};
+  const asOfRaw=grab(/as at:?,?\s*(.+?)\s*,*\s*$/i);
+  const asOf=asOfRaw?pdate(asOfRaw):null;
+  const limitRaw=grab(/Credit Limit:?,?\s*([^,]+)/i);
+  if(limitRaw!=null){
+    const limit=amt(limitRaw), avail=amt(grab(/Available Limit:?,?\s*([^,]+)/i));
+    const outstanding=(limit!=null&&avail!=null)?+(limit-avail).toFixed(2):null;
+    return {kind:'card', currency:ccy(limitRaw), outstanding, limit, available:avail, as_of:asOf};
+  }
+  const ledgerRaw=grab(/Ledger Balance:?,?\s*([^,]+)/i);
+  const availBalRaw=grab(/Available Balance:?,?\s*([^,]+)/i);
+  const bal=amt(ledgerRaw!=null?ledgerRaw:availBalRaw);
+  if(bal!=null) return {kind:'cash', currency:ccy(ledgerRaw||availBalRaw), balance:bal, available:amt(availBalRaw), as_of:asOf};
+  return null;
+}
 function isDBScc(t){return /Transaction Date,Transaction Posting Date,Transaction Description/.test(deq(t));}
 function parseDBScc(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^Transaction Date,/.test(deq(l)));const out=[];let masked=0,skipped=0;
   for(let i=hi+1;i<L.length;i++){if(!L[i].trim())continue;if(PAN.test(L[i]))masked++;PAN.lastIndex=0;
@@ -92,8 +115,10 @@ function parseGeneric(text){let masked=0,skipped=0;const out=[];const L=text.spl
 export function parseFile(text){
   if(/^\s*\{\\rtf/.test(text)) text = rtfToText(text);
   text = text.replace(PAN, m => m.replace(/\d/g, '•'));   // mask card numbers before anything else
-  return isDBScc(text) ? parseDBScc(text)
+  const res = isDBScc(text) ? parseDBScc(text)
        : isDBSsavings(text) ? parseDBSsavings(text)
        : isRevolut(text) ? parseRevolut(text)
        : parseGeneric(text);
+  res.balance = extractBalance(text);   // current cash balance / card outstanding, if the statement carries one
+  return res;
 }

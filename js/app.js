@@ -15,7 +15,7 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new Set(),
           holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
-          snapshots:[], tags:[], accounts:[], valuations:[], positions:[], fx:{}, tax:null, estate:null };
+          snapshots:[], tags:[], accounts:[], valuations:[], positions:[], fx:{}, balances:{}, tax:null, estate:null };
 // Yahoo symbol from (symbol, exchange)
 function ysym(symbol,exchange){ symbol=(symbol||'').toUpperCase().trim(); const ex=(exchange||'').toUpperCase();
   if(ex==='CRYPTO') return symbol.includes('-')?symbol:symbol+'-USD';
@@ -156,6 +156,16 @@ const empty=()=>`<div class="card" style="text-align:center;padding:44px"><h3>No
 const monthOpts=()=>{const ms=[...new Set(counted().map(t=>t.txn_date.slice(0,7)))].sort().reverse();return `<option value="all">All months</option>`+ms.map(m=>`<option value="${m}" ${month===m?'selected':''}>${fmtMonth(m)}</option>`).join('');};
 const acctOpts=()=>{const ts=[...new Set(counted().map(t=>t.account))];return `<option value="all">All accounts</option>`+ts.map(t=>`<option value="${t}" ${acct===t?'selected':''}>${ACCT(t).label}</option>`).join('');};
 
+// current balances captured from the latest imported statement per account (scoped to profile)
+function currentBalances(){
+  const B=M.balances||{}; const inSc=k=>profile==='household'||acctOwner(k)===profile||acctOwner(k)==='joint';
+  let cash=0, card=0, asOf=''; const rows=[];
+  Object.entries(B).forEach(([k,b])=>{ if(!b||!inSc(k))return; if(b.as_of&&b.as_of>asOf)asOf=b.as_of; const C=ACCT(k);
+    if(b.kind==='card'){ if(b.outstanding!=null){ const v=toSGD(b.outstanding,b.currency); card+=v; rows.push({label:C.label,kind:'card',amount:v,as_of:b.as_of,color:C.color}); } }
+    else if(b.balance!=null){ const v=toSGD(b.balance,b.currency); cash+=v; rows.push({label:C.label,kind:'cash',amount:v,as_of:b.as_of,color:C.color}); } });
+  rows.sort((a,b)=>b.amount-a.amount);
+  return {cash, card, net:cash-card, asOf, rows};
+}
 function overviewView(){
   const scope=counted().filter(inScope);
   const out=scope.filter(t=>t.direction==='out'), inn=scope.filter(t=>t.direction==='in');
@@ -165,9 +175,18 @@ function overviewView(){
   const latest=scope.slice().sort((a,b)=>b.txn_date.localeCompare(a.txn_date)).slice(0,6);
   const asOf=scope.length?scope.map(t=>t.txn_date).sort().slice(-1)[0]:'';
   const fcOut=out.filter(t=>t.fcy).reduce((s,t)=>s+t.amount,0), localOut=totOut-fcOut;
-  let left=`<div class="card"><div class="filters"><select onchange="SI.setAcct(this.value)">${acctOpts()}</select><select onchange="SI.setMonth(this.value)">${monthOpts()}</select></div>
-    <div class="cash"><div class="lbl">Net cashflow</div><div class="v" style="color:${net<0?'var(--txt)':'var(--pos)'}">${money(net)}</div>${asOf?`<div class="as">As of ${dfull(asOf)}</div>`:''}</div>
-    ${svgInOut(ms)}
+  const CB=currentBalances();
+  let left=`<div class="card"><div class="filters"><select onchange="SI.setAcct(this.value)">${acctOpts()}</select><select onchange="SI.setMonth(this.value)">${monthOpts()}</select></div>`;
+  if(CB.rows.length){
+    left+=`<div class="cash"><div class="lbl">Cash on hand</div><div class="v" style="color:var(--pos)">${money(CB.cash)}</div>${CB.asOf?`<div class="as">As of ${dfull(CB.asOf)}</div>`:''}</div>
+      <div class="io"><div><div class="k">💳 Card outstanding</div><div class="n" style="color:var(--neg)">${CB.card?'−'+money0(CB.card):'—'}</div></div><div><div class="k">Net position</div><div class="n" style="color:${CB.net<0?'var(--neg)':'var(--pos)'}">${signed(CB.net).replace('+','')}</div></div></div>
+      <div class="balrows">${CB.rows.map(r=>`<div class="balrow"><span class="dot" style="background:${r.color}"></span><span class="bl">${r.label}</span><span class="bk">${r.kind==='card'?'outstanding':'balance'}${r.as_of?' · '+dfull(r.as_of):''}</span><span class="bv"${r.kind==='card'?' style="color:var(--neg)"':''}>${r.kind==='card'?'−':''}${money0(r.amount)}</span></div>`).join('')}</div>
+      <div class="cash sec"><div class="lbl">Net flow · ${month==='all'?'all months':fmtMonth(month)}</div><div class="v2" style="color:${net<0?'var(--txt)':'var(--pos)'}">${money(net)}</div></div>`;
+  } else {
+    left+=`<div class="cash"><div class="lbl">Net cashflow</div><div class="v" style="color:${net<0?'var(--txt)':'var(--pos)'}">${money(net)}</div>${asOf?`<div class="as">As of ${dfull(asOf)}</div>`:''}</div>
+      <div class="flag info" style="margin:2px 0 4px"><span class="ic2">🏦</span><span>Import a DBS statement to show your <b>current balance</b> here — it's read from the statement header.</span></div>`;
+  }
+  left+=`${svgInOut(ms)}
     <div class="io"><div><div class="k"><span class="dot" style="background:var(--pos)"></span>Money in</div><div class="n">${money0(totIn)}</div></div><div><div class="k"><span class="dot" style="background:var(--neg)"></span>Money out</div><div class="n">${money0(totOut)}</div></div></div>
     <div class="io"><div><div class="k">🇸🇬 Local (SGD)</div><div class="n">${money0(localOut)}</div></div><div style="background:var(--fc-bg)"><div class="k">🌏 Foreign (FX)</div><div class="n">${money0(fcOut)}</div></div></div></div>
     <div class="card"><h2>Spending by category</h2>`;
@@ -335,11 +354,17 @@ async function importText(text,name,type){const key=type+'/'+name;
     const overlap=acctDates.some(d=>d>=lo&&d<=hi); if(overlap) logLine(`<span style="color:var(--warn)">⚠ ${key}: date range overlaps an earlier ${type} import — probable duplicates flagged for Review.</span>`); }
   try{ await db.insertTransactions(payload); await db.recordImported(type,name,hash); M.files.add(key); M.fileHashes.add(hash); }
   catch(e){ logLine(`<span class="err">✗ ${key}: DB error — ${e.message}</span>`); _importErrors.push(`${key}: ${e.message}`); return 0; }
+  if(r.balance){ // keep the newest statement's balance per account (latest as_of wins)
+    const prev=_importBalances[type]; if(!prev || (r.balance.as_of||'')>=(prev.as_of||'')) _importBalances[type]=r.balance;
+    logLine(`<span class="muted">  ↳ balance captured: ${r.balance.kind==='card'?'card outstanding':'cash'} as of ${r.balance.as_of||'?'}</span>`); }
   logLine(`<span class="ok">✓ ${key}: ${payload.length} txns (${r.rows[0].src})${dups?` · <b style="color:var(--warn)">${dups} probable duplicates → Review</b>`:''}${r.confident?'':' <b style="color:var(--warn)">⚠ needs review</b>'}</span>`);return payload.length;}
-let _importErrors=[];
-async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
+let _importErrors=[], _importBalances={};
+async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];_importBalances={};$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
   let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);await finishImport(a);}
-async function finishImport(a){ logLine(`<b>Done — ${a} new.</b>`); await reload();
+async function finishImport(a){ logLine(`<b>Done — ${a} new.</b>`);
+  // persist any captured statement balances BEFORE reload so the dashboard picks them up
+  if(Object.keys(_importBalances).length){ try{ await db.setBalances({...(M.balances||{}), ..._importBalances}); logLine(`<span class="ok">✓ current balances updated</span>`);}catch(e){ logLine(`<span class="err">balance save failed: ${e.message}</span>`); } }
+  await reload();
   if(_importErrors.length){ toast('Import failed — '+_importErrors[0]); return; }    // keep the log visible
   if(a>0){ toast(`Imported ${a} new transaction(s)`); go('overview'); }              // jump to dashboard
   else { toast('No new transactions — see the import log above for the reason.'); }  // keep the log visible
@@ -353,7 +378,7 @@ async function idbGet(k){const d=await idb();return new Promise((res,rej)=>{cons
 async function ensurePerm(h){const o={mode:'read'};if((await h.queryPermission(o))==='granted')return true;return (await h.requestPermission(o))==='granted';}
 async function connectFolder(){if(!FS_OK){alert('Folder scan needs Chrome/Edge. Use manual drop otherwise.');return;}try{DIR=await window.showDirectoryPicker({mode:'read'});await idbSet('dir',DIR);DIRNAME=DIR.name;if($('#folderStatus'))$('#folderStatus').textContent='Connected: '+DIRNAME;scanDelta();}catch(e){}}
 async function scanDelta(){if(!DIR){logLine('<span class="err">Connect the folder first.</span>');return;}if(!(await ensurePerm(DIR))){logLine('<span class="err">Permission denied.</span>');return;}
-  $('#log').innerHTML='';logLine('<span class="spinner"></span>Scanning subfolders…');let a=0,seen=false;
+  _importErrors=[];_importBalances={};$('#log').innerHTML='';logLine('<span class="spinner"></span>Scanning subfolders…');let a=0,seen=false;
   for await(const sub of DIR.values()){if(sub.kind!=='directory')continue;const type=sub.name.toLowerCase();
     for await(const e of sub.values()){if(e.kind!=='file'||!/\.(csv|txt|rtf)$/i.test(e.name))continue;seen=true;const f=await e.getFile();a+=await importText(await f.text(),e.name,type);}}
   if(!seen)logLine('<span class="muted">No CSV files found in subfolders.</span>');await finishImport(a);}
@@ -498,10 +523,12 @@ function homeView(){
   const out=mt.filter(t=>t.direction==='out'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
   const save= inn? Math.round((inn-out)/inn*100):null;
   const topAlloc=alloc[0], topPct=nw.holdings?Math.round(topAlloc?.[1]/nw.holdings*100):0;
+  const LB=NW.liquidityBuckets(M.holdings, profile, M.fx, today());
+  const availNow=LB.availableNow+nw.cash;
 
   let h=`<div class="pagehead"><h1>${profLabel(profile)}</h1><p class="muted">Your position at a glance — reviewed periodically, pivoted deliberately.</p></div>`;
   h+=`<div class="kpis">
-    ${kpi('Net worth', sgd0(nw.total), `${sgd0(nw.holdings)} invested`)}
+    ${kpi('Net worth', sgd0(nw.total), `${sgd0(availNow)} available now${LB.vestingLater?' · '+sgd0(LB.vestingLater)+' vesting':''}`)}
     ${kpi('Savings rate', save==null?'—':save+'%', lm?`${fmtMonth(lm)} · in ${sgd0(inn)} / out ${sgd0(out)}`:'import statements')}
     ${kpi('Cash &amp; liquidity', sgd0(nw.cash), nw.cash?`emergency buffer${nw.debt?' · debt '+sgd0(nw.debt):''}`:'liquid savings — none recorded yet')}
     ${kpi('Life cover', sgd0(cover.death), `CI ${sgd0(cover.ci)}`)}
@@ -528,12 +555,34 @@ function trendNW(snaps){ const s=snaps.slice().sort((a,b)=>(a.created_at||'').lo
   const pts=s.map((p,i)=>`${x(i)},${y(p.net_worth_sgd)}`).join(' ');
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>${s.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.net_worth_sgd)}" r="${i===s.length-1?4:3}" fill="var(--accent)"/>`).join('')}</svg>`; }
 
+const LIQ={liquid:['Available','var(--pos)'],vesting:['Vesting','var(--accent)'],locked:['Locked','var(--ink-3)']};
+function liqChip(hd){ const m=LIQ[NW.liquidityOf(hd)]||LIQ.liquid; return `<span class="liqtag" style="color:${m[1]}">●&nbsp;${m[0]}</span>`; }
+function liquidityCard(LB, nw, availNow){
+  const segs=[['Available now',availNow,'var(--pos)'],['Vesting later',LB.vestingLater,'var(--accent)'],['Locked',LB.locked,'var(--ink-3)']];
+  const tot=segs.reduce((s,x)=>s+x[1],0)||1;
+  let h=`<div class="card"><h2>Liquidity — when can you actually use it?</h2>
+    <div class="liqbar">${segs.filter(s=>s[1]>0).map(s=>`<span style="width:${s[1]/tot*100}%;background:${s[2]}" title="${s[0]}"></span>`).join('')}</div>
+    <div class="liqleg">${segs.map(s=>`<span><i style="background:${s[2]}"></i>${s[0]} · <b>${sgd0(s[1])}</b> <span class="muted">${Math.round(s[1]/tot*100)}%</span></span>`).join('')}</div>`;
+  if(LB.schedule.length){ let run=availNow;
+    h+=`<h2 style="margin-top:18px">Vesting schedule — what unlocks &amp; when</h2>
+      <table><thead><tr><th>Date</th><th>Holding</th><th class="num">Unlocks</th><th class="num">Available after</th></tr></thead><tbody>`;
+    LB.schedule.forEach(t=>{ run+=t.amount; h+=`<tr><td style="white-space:nowrap">${dfull(t.date)}</td><td>${esc(t.label||'')}</td><td class="num val-pos">+${sgd0(t.amount)}</td><td class="num">${sgd0(run)}</td></tr>`; });
+    h+=`</tbody></table>`;
+  } else if(LB.vestingLater>0){
+    h+=`<p class="caption muted" style="margin-top:10px">${sgd0(LB.vestingLater)} is marked vesting but has no dated tranches yet — open the holding to add its schedule.</p>`;
+  }
+  if(LB.needsSchedule.length) h+=`<div class="flag warn" style="margin-top:10px"><span class="ic2">⚠️</span><span>Marked as vesting but counted as available (no schedule): <b>${LB.needsSchedule.join(', ')}</b>. Add tranches for an accurate split.</span></div>`;
+  return h+`</div>`;
+}
 function wealthView(){
   const nw=NW.netWorth(M,profile);
   const hs=pf(M.holdings).sort((a,b)=>toSGD(b.value_local,b.currency)-toSGD(a.value_local,a.currency));
+  const LB=NW.liquidityBuckets(M.holdings, profile, M.fx, today());
+  const availNow=LB.availableNow+nw.cash;   // sellable/spendable today = liquid investments + already-vested + cash
   let h=`<div class="pagehead" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px"><h1>Wealth · ${profLabel(profile)}</h1>
     <div style="display:flex;gap:8px"><button class="btn" onclick="SI.quickUpdate()">Quick-update values</button><button class="btn pri" onclick="SI.snapshot()">Take snapshot</button></div></div>
-    <div class="kpis">${kpi('Net worth',sgd0(nw.total))}${kpi('Investments',sgd0(nw.holdings))}${kpi('Cash',sgd0(nw.cash))}${kpi('Property equity',sgd0(nw.realEstate))}</div>`;
+    <div class="kpis">${kpi('Net worth',sgd0(nw.total),`${sgd0(nw.holdings)} invested · ${sgd0(nw.realEstate)} property`)}${kpi('Available now',sgd0(availNow),'liquid + vested + cash')}${kpi('Vesting later',sgd0(LB.vestingLater),LB.schedule.length?'on a dated schedule':'add a schedule')}${kpi('Locked',sgd0(LB.locked),'CPF / SRS / retirement')}</div>`;
+  h+=liquidityCard(LB, nw, availNow);
   h+=insightCard('wealth');
   const stale=hs.filter(hd=>{const a=NW.dataFreshness(hd.as_of);return a.days!=null&&a.days>180;}).length;
   const oldest=hs.map(hd=>hd.as_of).filter(Boolean).sort()[0];
@@ -541,7 +590,7 @@ function wealthView(){
     <p class="caption" style="margin:-6px 0 10px">${oldest?`Oldest value from ${dfull(oldest)}.`:''} ${stale?`<span class="val-neg">${stale} not refreshed in 180+ days</span> — click a holding to update.`:'All values reasonably fresh.'}</p>
     <table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>Updated</th></tr></thead><tbody>`;
   hs.forEach(hd=>{ const v=toSGD(hd.value_local,hd.currency); const si=NW.sinceInception(hd,M.fx);
-    h+=`<tr style="cursor:pointer" onclick="SI.holding('${hd.id}')"><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''}${hd.currency!=='SGD'?' · '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
+    h+=`<tr style="cursor:pointer" onclick="SI.holding('${hd.id}')"><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''}${hd.currency!=='SGD'?' · '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''} · ${liqChip(hd)}</div></td>
       <td class="caption">${hd.owner}</td><td class="num">${sgd0(v)}</td>
       <td class="num ${si?valCls(si.gain):''}">${si?signed(si.gain)+' · '+(si.pct>=0?'+':'')+si.pct.toFixed(0)+'%':'—'}</td>
       <td>${freshPill(hd.as_of)}</td></tr>`; });
@@ -585,9 +634,30 @@ function openHolding(id){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return;
         <div><label class="caption">As of</label><br><input id="hvDate" type="date" value="${today()}" style="width:150px"></div>
         <button class="btn pri" onclick="SI.saveHoldingValue('${id}')">Save</button>
       </div><div id="hvMsg" class="caption" style="margin-top:8px"></div></div>
+    ${liquidityEditor(hd)}
     ${hist}`;
   $('#ov').classList.add('show');
 }
+function liquidityEditor(hd){ const eff=NW.liquidityOf(hd);
+  const opt=(v,l)=>`<option value="${v}" ${hd.liquidity===v?'selected':''}>${l}</option>`;
+  return `<div class="card" style="box-shadow:none;border:1px solid var(--hairline);margin-top:14px"><h2>Liquidity &amp; vesting</h2>
+    <div class="drow"><span class="k">Can you sell it now?</span><span class="v2"><select onchange="SI.setLiquidity('${hd.id}',this.value)">
+      <option value="" ${!hd.liquidity?'selected':''}>Auto — detected: ${LIQ[eff][0]}</option>
+      ${opt('liquid','Available now')}${opt('vesting','Vesting over time')}${opt('locked','Locked (CPF/SRS/retirement)')}
+    </select></span></div>
+    ${eff==='vesting'?vestingEditor(hd):`<p class="caption muted" style="margin-top:6px">Mark this as <b>Vesting</b> to add a dated unlock schedule.</p>`}</div>`;
+}
+function vestingEditor(hd){ const v=Array.isArray(hd.vesting)?hd.vesting:[];
+  const rows=[...v,{}].map((t,i)=>`<div class="drow" style="gap:8px;padding:4px 0"><input id="vt_d_${i}" type="date" value="${t.date||''}" style="width:150px"><input id="vt_v_${i}" type="number" value="${t.value??''}" placeholder="value (${hd.currency})" style="flex:1;text-align:right"></div>`).join('');
+  return `<div style="margin-top:10px"><div class="caption muted" style="margin-bottom:4px">Vesting tranches — each unlocks on its date. Past dates count as available now; leave the blank row to add another.</div>
+    ${rows}<div class="fbtns"><button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.saveVesting('${hd.id}',${v.length+1})">Save schedule</button></div></div>`;
+}
+async function setLiquidity(id,val){ try{ await db.updateHolding(id,{liquidity:val||null}); await reload(); render(); openHolding(id); }catch(e){ toast('Error: '+(e.message||e)); } }
+async function saveVesting(id,n){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return; const out=[];
+  for(let i=0;i<n;i++){ const d=$('#vt_d_'+i), vv=$('#vt_v_'+i); if(!d||!vv)continue; const date=d.value, value=parseFloat(vv.value); if(date&&!isNaN(value)) out.push({date,value,currency:hd.currency}); }
+  out.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  try{ await db.updateHolding(id,{vesting:out, liquidity:hd.liquidity||'vesting'}); await reload(); render(); openHolding(id); toast(`Vesting schedule saved · ${out.length} tranche(s)`); }
+  catch(e){ toast('Error: '+(e.message||e)); } }
 async function saveHoldingValue(id){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return;
   const val=parseFloat($('#hvVal').value), d=$('#hvDate').value;
   if(isNaN(val)||!d){ $('#hvMsg').textContent='Enter a value and date.'; $('#hvMsg').className='caption val-neg'; return; }
@@ -941,7 +1011,7 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  saveHoldingValue, savePolicy, planTab, scenIn, ask, askPrompt,
+  saveHoldingValue, setLiquidity, saveVesting, savePolicy, planTab, scenIn, ask, askPrompt,
   newChat, selectChat, deleteChat, send:sendChat,
   addEntity:t=>openEditor(t), editEntity:(t,id)=>openEditor(t,id), saveEditor, deleteEntity, toggleEstate, saveTax };
 

@@ -135,6 +135,14 @@ tr:last-child td{border-bottom:none}
 .cash .v{font-size:40px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin-top:2px}.cash .as{font-size:12px;color:var(--ink-3);margin-top:4px}
 .io{display:flex;gap:var(--s3);margin-top:var(--s2)}.io div{flex:1;background:var(--surface-sunken);border-radius:var(--r-sm);padding:12px 14px}
 .io .k{font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px}.io .n{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.balrows{margin-top:var(--s3);display:flex;flex-direction:column;gap:2px}
+.balrow{display:flex;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid var(--hairline);font-size:13px}
+.balrow:last-child{border-bottom:none}.balrow .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.balrow .bl{font-weight:600}.balrow .bk{color:var(--ink-3);font-size:12px;flex:1}.balrow .bv{font-weight:600;font-variant-numeric:tabular-nums}
+.cash.sec{padding:var(--s3) 0 0;border-top:1px solid var(--hairline);margin-top:var(--s3)}.cash.sec .lbl{font-size:12px}.cash .v2{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.liqbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface-sunken);margin:6px 0 12px}.liqbar span{display:block;height:100%}
+.liqleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.liqleg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.liqtag{font-weight:600;white-space:nowrap}
 .catrow,.txrow{display:flex;align-items:center;gap:13px;padding:12px 4px;border-bottom:1px solid var(--hairline);cursor:pointer}
 .catrow:last-child,.txrow:last-child{border-bottom:none}
 .catrow:hover,.txrow:hover{background:var(--surface-sunken);border-radius:var(--r-sm)}
