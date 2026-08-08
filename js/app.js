@@ -118,6 +118,7 @@ function renderShell(){
       <div class="brand">Shah Financial Insights</div>
       <nav id="nav"></nav>
       <div class="topright">
+        <button class="btn sm" style="background:rgba(255,255,255,.1);color:var(--bar-ink)" onclick="SI.openAsk()">✦ Ask</button>
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
         <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>
         <button class="btn sm ghost" onclick="SI.signOut()">Sign out</button>
@@ -798,8 +799,9 @@ function planAsk(){ const pos=pf(M.positions);
   $('#planbody').innerHTML=`<div class="card"><h2>Market — live prices &amp; analysis</h2>
     <p class="muted" style="margin-bottom:12px">Add tickers in <b>Wealth → Market positions</b>. Then ask market-aware questions — <b>analysis only, not advice</b>.</p>
     <div id="mktPrices">${pos.length?'<span class="muted">Loading live prices…</span>':'<span class="muted">No market positions yet — add tickers in Wealth → Market positions (e.g. NVDA / SUNPHARMA on NSE / ETH on CRYPTO).</span>'}</div>
-    <div style="display:flex;gap:8px;margin-top:16px"><input id="askq" placeholder="e.g. Am I overexposed to US tech given current valuations?" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
-    <div id="askOut" style="margin-top:14px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px"><input id="askq" placeholder="Ask anything — market or your finances…" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
+    ${promptChips('m')}
+    <div id="askOut" style="margin-top:12px"></div>
     <p class="caption muted" style="margin-top:10px">Live prices from Yahoo Finance; analysis by Claude. Your positions + prices are sent to the analysis function at query time. Not licensed financial advice.</p></div>`;
   if(pos.length) loadPrices(pos);
 }
@@ -812,11 +814,34 @@ async function loadPrices(pos){ const syms=[...new Set(pos.map(p=>ysym(p.symbol,
     el.innerHTML=h+`</tbody></table>`;
   }catch(e){ const el=$('#mktPrices'); if(el) el.innerHTML=`<span class="caption">Live prices need the deployed site — the market function isn't running on localhost. Positions still save; deploy to Netlify to see prices.</span>`; }
 }
-async function ask(){ const q=($('#askq')?.value||'').trim(); if(!q)return; const out=$('#askOut'); out.innerHTML='<span class="muted">Analysing against live market data…</span>';
+const SUGGESTED=[
+  "How is my wealth split across India, US and Singapore?",
+  "Is my SAP EquatePlus concentration a risk given the current share price?",
+  "Am I overexposed to US tech given current valuations?",
+  "How did my direct holdings move this week?",
+  "Is my India equity (Sun Pharma heavy) a concentration risk right now?",
+  "Am I on track to retire at 60?",
+  "If SAP stock fell 20%, what happens to my net worth?",
+  "Where should I focus next quarter to improve my position?",
+];
+function promptChips(target){ return `<div class="chips">`+SUGGESTED.map((s,i)=>`<button class="chip-btn" onclick="SI.askPrompt(${i},'${target}')">${esc(s)}</button>`).join('')+`</div>`; }
+async function askRun(qval, outEl){ const q=(qval||'').trim(); if(!q||!outEl)return;
+  outEl.innerHTML='<span class="muted"><span class="spinner"></span>Analysing against your data + live market prices…</span>';
   const pos=pf(M.positions).map(p=>({symbol:p.symbol,exchange:p.exchange,ysym:ysym(p.symbol,p.exchange),quantity:p.quantity,currency:p.currency,label:p.label}));
   try{ const r=await fetch('/.netlify/functions/market-ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q, positions:pos, summary:dataSummary()})});
-    if(!r.ok) throw new Error('fn'); const d=await r.json(); out.innerHTML=esc(d.answer||'').replace(/\n/g,'<br>');
-  }catch(e){ out.innerHTML='<span class="muted">Ask isn’t active yet — deploy to Netlify and set <b>ANTHROPIC_API_KEY</b> in env vars (see README). Live prices above still work once deployed.</span>'; }
+    if(!r.ok) throw new Error('fn'); const d=await r.json(); outEl.innerHTML=esc(d.answer||'').replace(/\n/g,'<br>');
+  }catch(e){ outEl.innerHTML='<span class="muted">Ask isn’t active yet — deploy to Netlify and set <b>ANTHROPIC_API_KEY</b> in env vars (see README).</span>'; }
+}
+function ask(){ askRun($('#askq')?.value, $('#askOut')); }
+function askGlobal(){ askRun($('#gaskq')?.value, $('#gaskOut')); }
+function askPrompt(i, target){ const t=SUGGESTED[i]; const inp=target==='g'?$('#gaskq'):$('#askq'); if(inp)inp.value=t; target==='g'?askGlobal():ask(); }
+// global Ask — reachable from any tab (same brain, full dashboard context)
+function openAsk(){ $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>Ask — anything about your finances</h3>
+    <p class="muted" style="margin:4px 0 12px">One assistant over your whole dashboard + live market prices. Analysis, not advice.</p>
+    <div style="display:flex;gap:8px"><input id="gaskq" placeholder="Ask a question…" style="flex:1" onkeydown="if(event.key==='Enter')SI.askGlobal()"><button class="btn pri" onclick="SI.askGlobal()">Ask</button></div>
+    ${promptChips('g')}
+    <div id="gaskOut" style="margin-top:12px"></div>`;
+  $('#ov').classList.add('show'); setTimeout(()=>$('#gaskq')?.focus(),50);
 }
 function dataSummary(){ const nw=NW.netWorth(M,'household');
   return { netWorth:Math.round(nw.total), invested:Math.round(nw.holdings), cash:Math.round(nw.cash),
@@ -884,7 +909,7 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  saveHoldingValue, savePolicy, planTab, scenIn, ask,
+  saveHoldingValue, savePolicy, planTab, scenIn, ask, askGlobal, askPrompt, openAsk,
   addEntity:t=>openEditor(t), editEntity:(t,id)=>openEditor(t,id), saveEditor, deleteEntity, toggleEstate, saveTax };
 
 // temporary spouse-join helper (used from console until a Join UI is added)

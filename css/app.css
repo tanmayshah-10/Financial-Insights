@@ -70,6 +70,11 @@ code{background:var(--surface-sunken);padding:1px 6px;border-radius:6px;font-siz
 .kpi .v{font-size:27px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--heading)}
 .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
 
+/* suggested prompt chips */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip-btn{border:1px solid var(--hairline);background:var(--surface);color:var(--ink-2);border-radius:var(--r-pill);padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.chip-btn:hover{border-color:var(--area);color:var(--ink);background:var(--surface-sunken)}
+
 /* donut chart + legend */
 .donutwrap{display:flex;gap:var(--s5);align-items:center;flex-wrap:wrap}
 .legend{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px}
