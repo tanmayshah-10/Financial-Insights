@@ -12,7 +12,12 @@
 /* nav — a distinct deep ribbon */
 .top{position:sticky;top:0;z-index:30;background:var(--bar-bg);box-shadow:0 1px 0 rgba(0,0,0,.15)}
 .topin{max-width:1080px;margin:0 auto;padding:0 var(--s5);display:flex;align-items:center;gap:var(--s5);height:56px}
-.brand{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;color:var(--bar-ink)}
+.brand{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;color:var(--bar-ink);display:flex;align-items:center;gap:9px}
+.brand-mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#4c92dd,#17a673);box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;flex:none}
+.nw-chip{display:flex;flex-direction:column;line-height:1.15;padding:0 var(--s4);border-left:1px solid rgba(255,255,255,.12);white-space:nowrap}
+.nw-chip span{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--bar-ink-2)}
+.nw-chip b{font-size:15px;color:var(--bar-ink);font-variant-numeric:tabular-nums}
+@media(max-width:720px){.nw-chip{display:none}}
 nav{display:flex;gap:2px;flex:1;overflow-x:auto}
 nav button{border:none;background:none;font:inherit;font-size:15px;color:var(--bar-ink-2);padding:7px 13px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap}
 nav button:hover{color:var(--bar-ink);background:var(--bar-active)}
@@ -64,6 +69,14 @@ code{background:var(--surface-sunken);padding:1px 6px;border-radius:6px;font-siz
 .kpi .l{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--heading-2);font-weight:700}
 .kpi .v{font-size:27px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--heading)}
 .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
+
+/* donut chart + legend */
+.donutwrap{display:flex;gap:var(--s5);align-items:center;flex-wrap:wrap}
+.legend{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px}
+.lg{display:flex;align-items:center;gap:9px;font-size:14px}
+.sw{width:11px;height:11px;border-radius:3px;flex:none}
+.lg-l{flex:1;text-transform:capitalize}
+.lg-v{font-variant-numeric:tabular-nums;color:var(--ink-2)}
 
 /* bar rows (allocation / goals) */
 .bar-row{display:flex;align-items:center;gap:var(--s3);padding:8px 0}

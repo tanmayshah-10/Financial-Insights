@@ -109,9 +109,11 @@ const AREAS=[['home','Home'],['cashflow','Cash Flow'],['wealth','Wealth'],['prot
 const CF_TABS=['overview','insights','transactions','review','import'];
 const mountEl=()=>AREA==='cashflow'?'#cfbody':'#view';
 function renderShell(){
+  const netw = M.holdings?.length ? NW.netWorth(M,'household').total : 0;
   app.innerHTML=`<div class="top"><div class="topin">
-      <div class="brand">Financial Insights</div>
+      <div class="brand"><span class="brand-mark"></span>Financial Insights</div>
       <nav id="nav"></nav>
+      ${netw?`<div class="nw-chip"><span>Net worth</span><b>${sgd0(netw)}</b></div>`:''}
       <div class="topright">
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
         <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>
@@ -131,7 +133,7 @@ function go(x){
   else { AREA=x; if(x==='cashflow' && !CF_TABS.includes(TAB)) TAB='overview'; }
   renderShell(); render(); window.scrollTo(0,0);
 }
-function setProfile(p){ profile=p; render(); }
+function setProfile(p){ profile=p; renderShell(); render(); }
 
 // ============================ RENDER ============================
 const AREA_ACCENT={home:'#2f6fb2',cashflow:'#b5701a',wealth:'#3a5bd0',protection:'#1f8a5b',plan:'#6f43c0',settings:'#56565b'};
@@ -161,9 +163,9 @@ function overviewView(){
   const asOf=scope.length?scope.map(t=>t.txn_date).sort().slice(-1)[0]:'';
   const fcOut=out.filter(t=>t.fcy).reduce((s,t)=>s+t.amount,0), localOut=totOut-fcOut;
   let left=`<div class="card"><div class="filters"><select onchange="SI.setAcct(this.value)">${acctOpts()}</select><select onchange="SI.setMonth(this.value)">${monthOpts()}</select></div>
-    <div class="cash"><div class="lbl">Net cashflow</div><div class="v" style="color:${net<0?'var(--txt)':'var(--green)'}">${money(net)}</div>${asOf?`<div class="as">As of ${dfull(asOf)}</div>`:''}</div>
+    <div class="cash"><div class="lbl">Net cashflow</div><div class="v" style="color:${net<0?'var(--txt)':'var(--pos)'}">${money(net)}</div>${asOf?`<div class="as">As of ${dfull(asOf)}</div>`:''}</div>
     ${svgInOut(ms)}
-    <div class="io"><div><div class="k"><span class="dot" style="background:var(--green)"></span>Money in</div><div class="n">${money0(totIn)}</div></div><div><div class="k"><span class="dot" style="background:var(--red)"></span>Money out</div><div class="n">${money0(totOut)}</div></div></div>
+    <div class="io"><div><div class="k"><span class="dot" style="background:var(--pos)"></span>Money in</div><div class="n">${money0(totIn)}</div></div><div><div class="k"><span class="dot" style="background:var(--neg)"></span>Money out</div><div class="n">${money0(totOut)}</div></div></div>
     <div class="io"><div><div class="k">🇸🇬 Local (SGD)</div><div class="n">${money0(localOut)}</div></div><div style="background:var(--fc-bg)"><div class="k">🌏 Foreign (FX)</div><div class="n">${money0(fcOut)}</div></div></div></div>
     <div class="card"><h2>Spending by category</h2>`;
   if(!cats.length)left+=`<div class="muted">No spending in this period.</div>`;
@@ -200,12 +202,12 @@ function insightsView(){
   h+=`<div class="card"><h2>Foreign currency & forex charges</h2><div class="flag warn"><span class="ic2">💱</span><span>You spent <b>${money0(fcSGD)}</b> in foreign currency and paid an estimated <b>${money0(fxf)}</b> in FX fees (~3.25% card markup, validated against your statements).</span></div>`;
   const byCur={};fc.forEach(t=>{const k=t.fcy_cur||'??';byCur[k]=byCur[k]||{sgd:0,fee:0,n:0};byCur[k].sgd+=t.amount;byCur[k].fee+=fxFee(t);byCur[k].n++;});
   if(Object.keys(byCur).length){h+=`<table><thead><tr><th>Currency</th><th class="num">Txns</th><th class="num">SGD charged</th><th class="num">Est. FX fee</th></tr></thead><tbody>`;
-    Object.entries(byCur).sort((a,b)=>b[1].sgd-a[1].sgd).forEach(([k,v])=>h+=`<tr><td>${k}</td><td class="num">${v.n}</td><td class="num">${money0(v.sgd)}</td><td class="num" style="color:var(--orange)">${money0(v.fee)}</td></tr>`);h+=`</tbody></table>`;}
+    Object.entries(byCur).sort((a,b)=>b[1].sgd-a[1].sgd).forEach(([k,v])=>h+=`<tr><td>${k}</td><td class="num">${v.n}</td><td class="num">${money0(v.sgd)}</td><td class="num" style="color:var(--warn)">${money0(v.fee)}</td></tr>`);h+=`</tbody></table>`;}
   const milesGiven=fcSGD*2.2, be=(FXFEE_PCT*100)/2.2;
   h+=`<div class="rec"><h4>💳 Multi-currency / Revolut vs credit card on foreign spend</h4>
     <div class="muted">Charging in the foreign currency (multi-currency debit or Revolut) avoids the ~3.25% markup — but you forgo ~2.2 mpd of credit-card miles.</div>
     <table style="margin-top:8px"><tbody>
-    <tr><td>FX fees avoided</td><td class="num" style="color:var(--green)">${money0(fxf)}</td></tr>
+    <tr><td>FX fees avoided</td><td class="num" style="color:var(--pos)">${money0(fxf)}</td></tr>
     <tr><td>Miles given up (credit @2.2 mpd)</td><td class="num">${milesRange(milesGiven)}</td></tr>
     <tr><td><b>Break-even</b></td><td class="num"><b>${be.toFixed(2)}¢ / mile</b></td></tr></tbody></table>
     <div class="muted" style="margin-top:6px">Value miles <b>below ${be.toFixed(2)}¢</b> → multi-currency/Revolut wins. <b>Above</b> (business-class redeemers) → keep the credit card. Confirm a case in Spend Router.</div></div></div>`;
@@ -225,10 +227,10 @@ function svgInOut(ms){const keys=Object.keys(ms).sort();if(!keys.length)return '
   const W=Math.max(380,keys.length*64),H=170,pad=28,slot=(W-pad*2)/keys.length,bw=Math.min(13,slot/3.2);let s='';
   keys.forEach((k,i)=>{const cx=pad+i*slot+slot/2;if(k===month)s+=`<rect x="${cx-slot/2+4}" y="6" width="${slot-8}" height="${H-12}" rx="8" fill="#f0f0f2"/>`;
     const ih=(ms[k].in/max)*(H-pad*2),oh=(ms[k].out/max)*(H-pad*2);
-    s+=`<rect x="${cx-bw-2}" y="${H-pad-ih}" width="${bw}" height="${ih}" rx="3" fill="var(--green)"/><rect x="${cx+2}" y="${H-pad-oh}" width="${bw}" height="${oh}" rx="3" fill="var(--red)"/><text x="${cx}" y="${H-9}" fill="var(--txt2)" font-size="11" text-anchor="middle">${MN[+k.slice(5,7)-1]}</text>`;});
+    s+=`<rect x="${cx-bw-2}" y="${H-pad-ih}" width="${bw}" height="${ih}" rx="3" fill="var(--pos)"/><rect x="${cx+2}" y="${H-pad-oh}" width="${bw}" height="${oh}" rx="3" fill="var(--neg)"/><text x="${cx}" y="${H-9}" fill="var(--ink-3)" font-size="11" text-anchor="middle">${MN[+k.slice(5,7)-1]}</text>`;});
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:200px">${s}</svg>`;}
 
-function txRow(t){const sign=t.direction==='in'?'+':'-';const A=ACCT(t.account);const col=t.direction==='in'?'var(--green)':'var(--txt)';const flg=t.pin?'📌 ':t.flag==='wrong'?'⚠️ ':t.flag==='duplicate'?'⧉ ':t.flag==='refund'?'⏳ ':'';
+function txRow(t){const sign=t.direction==='in'?'+':'-';const A=ACCT(t.account);const col=t.direction==='in'?'var(--pos)':'var(--txt)';const flg=t.pin?'📌 ':t.flag==='wrong'?'⚠️ ':t.flag==='duplicate'?'⧉ ':t.flag==='refund'?'⏳ ':'';
   return `<div class="txrow" onclick="SI.open('${t.id}')"><div class="ic" style="background:${A.bg}">${ic(t.category)}<span class="acctdot" style="background:${A.color}"></span></div>
     <div class="nm"><div class="t">${flg}${esc(t.raw||t.merchant||'')}</div><div class="s">${t.category}${t.fcy?` · <span style="color:#9a5b00">${t.fcy_cur} ${t.fcy_amt?(+t.fcy_amt).toLocaleString():''}</span>`:''}${t.review?' · review':''}</div></div>
     <div class="am" style="color:${col}">${sign}${money0(t.amount)}</div><div class="chev">›</div></div>`;}
@@ -279,7 +281,7 @@ async function saveCatManager(nOld){const old=catList().slice();
 // ---- detail sheet ----
 function openSheet(id){const t=M.tx.find(x=>x.id===id);if(!t)return;const A=ACCT(t.account);
   const row=(k,v)=>`<div class="drow"><span class="k">${k}</span><span class="v2">${v}</span></div>`;
-  let fx='';if(t.fcy){const rate=t.fcy_amt?(t.amount/t.fcy_amt):0;fx=row('Foreign amount',`${t.fcy_cur} ${t.fcy_amt?(+t.fcy_amt).toLocaleString():'—'}`)+row('SGD charged',money(t.amount))+(rate?row('Implied rate',`${rate.toFixed(4)} SGD/${t.fcy_cur}`):'')+row('Est. FX fee (~3.25%)',`<span style="color:var(--orange)">${money(fxFee(t))}</span>`);}
+  let fx='';if(t.fcy){const rate=t.fcy_amt?(t.amount/t.fcy_amt):0;fx=row('Foreign amount',`${t.fcy_cur} ${t.fcy_amt?(+t.fcy_amt).toLocaleString():'—'}`)+row('SGD charged',money(t.amount))+(rate?row('Implied rate',`${rate.toFixed(4)} SGD/${t.fcy_cur}`):'')+row('Est. FX fee (~3.25%)',`<span style="color:var(--warn)">${money(fxFee(t))}</span>`);}
   $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button>
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px"><div class="ic" style="width:48px;height:48px;font-size:22px;background:${A.bg}">${ic(t.category)}<span class="acctdot" style="background:${A.color};width:14px;height:14px"></span></div><div><h3 style="margin:0">${t.direction==='in'?'+':'-'}${money(t.amount)}</h3><div class="muted">${esc(t.raw||t.merchant||'')}</div></div></div>
     <div style="margin:10px 0"><span class="acctchip" style="background:${A.bg};color:${A.color}"><span class="dot" style="background:${A.color}"></span>${A.label}</span> ${t.fcy?'<span class="chip fc">Foreign currency</span>':'<span class="chip">🇸🇬 Local SGD</span>'}</div>
@@ -288,7 +290,7 @@ function openSheet(id){const t=M.tx.find(x=>x.id===id);if(!t)return;const A=ACCT
     ${row('Direction',t.direction==='in'?'Money in':'Money out')}${row('Channel',t.channel||'—')}${fx}
     ${t.status?row('Status',t.status):''}${row('Source',(t.src||'')+(t.review?' · needs review':''))}
     <div class="fbtns"><button class="fb ${t.pin?'on':''}" onclick="SI.toggle('${t.id}','pin')">📌 Pin</button><button class="fb ${t.flag==='wrong'?'on':''}" onclick="SI.toggle('${t.id}','wrong')">⚠️ Wrong</button><button class="fb ${t.flag==='duplicate'?'on':''}" onclick="SI.toggle('${t.id}','duplicate')">⧉ Dup</button><button class="fb ${t.flag==='refund'?'on':''}" onclick="SI.toggle('${t.id}','refund')">⏳ Refund</button></div>
-    <div class="fbtns">${t.review?`<button class="fb" style="background:var(--green);color:#fff;border-color:var(--green)" onclick="SI.approve('${t.id}',true)">✓ Approve</button>`:''}<button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.routeTx('${t.id}')">↗ Route</button><button class="fb" style="color:var(--red)" onclick="SI.del('${t.id}')">🗑 Delete</button></div>`;
+    <div class="fbtns">${t.review?`<button class="fb" style="background:var(--pos);color:#fff;border-color:var(--pos)" onclick="SI.approve('${t.id}',true)">✓ Approve</button>`:''}<button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.routeTx('${t.id}')">↗ Route</button><button class="fb" style="color:var(--neg)" onclick="SI.del('${t.id}')">🗑 Delete</button></div>`;
   $('#ov').classList.add('show');}
 const closeSheet=()=>$('#ov').classList.remove('show');
 
@@ -382,7 +384,13 @@ function routeCat(cat,amt,fcy){const p=new URLSearchParams({mode:'earn',amt,cat:
 const pf=items=>NW.byProfile(items||[],profile);
 const kpi=(l,v,s,cls='')=>`<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
 const freshPill=asOf=>{const f=NW.dataFreshness(asOf);const c=f.status==='old'?'neg':f.status==='stale'?'warn':'ok';return `<span class="age age-${c}">${f.label}</span>`;};
-const RAMP=['var(--accent)','var(--accent-2)','var(--accent-3)','var(--accent-4)','var(--ink-3)','var(--hairline)'];
+// vivid categorical palette for charts (bright but coordinated)
+const RAMP=['#3a5bd0','#17a673','#e8873a','#8a4fd6','#12a5c4','#d64b8a','#e0b23a','#5a8f2e','#c0453a','#6b7280'];
+function donut(entries,total){ if(!entries.length)return '';
+  const R=54,C=64,circ=2*Math.PI*R; let off=0;
+  const arcs=entries.map(([c,v],i)=>{const frac=total?v/total:0;const dash=frac*circ;const seg=`<circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${RAMP[i%RAMP.length]}" stroke-width="18" stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-off}" transform="rotate(-90 ${C} ${C})"/>`;off+=dash;return seg;}).join('');
+  const legend=entries.map(([c,v],i)=>`<div class="lg"><span class="sw" style="background:${RAMP[i%RAMP.length]}"></span><span class="lg-l">${c}</span><span class="lg-v">${sgd0(v)} · ${pct(v,total)}%</span></div>`).join('');
+  return `<div class="donutwrap"><svg viewBox="0 0 128 128" width="128" height="128">${arcs}<text x="64" y="60" text-anchor="middle" font-size="10" fill="var(--ink-3)">Total</text><text x="64" y="76" text-anchor="middle" font-size="13" font-weight="600" fill="var(--heading)">${sgd0(total).replace('SGD ','')}</text></svg><div class="legend">${legend}</div></div>`; }
 
 // ---- per-tab insights: "what the data shows & what to consider" ----
 function insightCard(area){ const items=insightsFor(area); if(!items.length) return '';
@@ -427,14 +435,14 @@ function homeView(){
   h+=`<div class="kpis">
     ${kpi('Net worth', sgd0(nw.total), `${sgd0(nw.holdings)} invested`)}
     ${kpi('Savings rate', save==null?'—':save+'%', lm?`${fmtMonth(lm)} · in ${sgd0(inn)} / out ${sgd0(out)}`:'import statements')}
-    ${kpi('Cash', sgd0(nw.cash), nw.debt?`debt ${sgd0(nw.debt)}`:'')}
+    ${kpi('Cash &amp; liquidity', sgd0(nw.cash), nw.cash?`emergency buffer${nw.debt?' · debt '+sgd0(nw.debt):''}`:'liquid savings — none recorded yet')}
     ${kpi('Life cover', sgd0(cover.death), `CI ${sgd0(cover.ci)}`)}
   </div>`;
   // flags
   if(fl.length){ h+=`<div class="card"><h2>Flags</h2>${fl.map(f=>`<div class="flagline"><span class="dot dot-${f.severity==='danger'?'danger':f.severity==='warn'?'warn':'ok'}"></span><span><b>${f.title}.</b> ${f.detail}</span></div>`).join('')}</div>`; }
   // allocation
-  if(alloc.length){ h+=`<div class="card"><h2>Wealth allocation</h2>${allocBars(alloc, nw.holdings)}
-    ${topPct>40?`<p class="caption" style="margin-top:10px">● <span class="val-neg">${topAlloc[0]}</span> is ${topPct}% of invested wealth — concentration to watch.</p>`:''}</div>`; }
+  if(alloc.length){ h+=`<div class="card"><h2>Wealth allocation</h2>${donut(alloc, nw.holdings)}
+    ${topPct>40?`<p class="caption" style="margin-top:10px"><span class="dotmark" style="background:${RAMP[0]}"></span><span class="val-neg">${topAlloc[0]}</span> is ${topPct}% of invested wealth — concentration to watch.</p>`:''}</div>`; }
   // goals
   if(goals.length){ h+=`<div class="card"><h2>Goals</h2>${goals.map(g=>goalBar(g)).join('')}</div>`; }
   // net worth trend
@@ -548,14 +556,22 @@ function openPolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return; co
 }
 
 let PLAN_TAB='goals';
-const SCEN={ fire:{expenses:null,mult:25,ret:5,contrib:5000,invested:0}, sap:{stock:1,salary:1,ins:1} };
+const SCEN={ fire:{expenses:null,mult:25,ret:5,contrib:5000,invested:0}, sap:{stock:1,salary:1,ins:1}, goal:{target:200000,monthly:null,ret:4} };
 function planTab(t){ PLAN_TAB=t; planBody(); }
-function scenIn(g,k,v){ SCEN[g][k]= v===''?0:parseFloat(v); if(PLAN_TAB==='fire')computeFire(); else if(PLAN_TAB==='leavesap')computeSap(); }
+function scenIn(g,k,v){ SCEN[g][k]= v===''?0:parseFloat(v); if(PLAN_TAB==='fire')computeFire(); else if(PLAN_TAB==='leavesap')computeSap(); else if(PLAN_TAB==='goals')computeGoal(); }
 function annualExpenses(){ // from real transactions (household), avg monthly spend × 12
   const P=counted().filter(t=>t.direction==='out'&&!nonspendSet().has(t.category));
   const ms=[...new Set(P.map(t=>t.txn_date.slice(0,7)))]; if(!ms.length) return 120000;
   const total=P.reduce((s,t)=>s+t.amount,0); return Math.round(total/ms.length*12);
 }
+function monthlySurplus(){ const P=counted().filter(pMatch);
+  const ms=[...new Set(P.map(t=>t.txn_date.slice(0,7)))]; if(!ms.length) return 0;
+  const NOFLOW=new Set(['Transfer','Refund']);
+  const inc=P.filter(t=>t.direction==='in'&&!NOFLOW.has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const exp=P.filter(t=>t.direction==='out'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
+  return Math.round((inc-exp)/ms.length);
+}
+function selfPremiums(){ return pf(M.policies).filter(p=>!isCompanyPolicy(p)).reduce((s,p)=>s+premYr(p),0); }
 function planView(){
   const sub=[['goals','Goals'],['fire','FIRE'],['leavesap','Leave SAP'],['ask','Ask']];
   $('#view').innerHTML=`<div class="pagehead"><h1>Plan · ${profLabel(profile)}</h1><p class="muted">Simulations only — your data never changes.</p></div>
@@ -566,11 +582,33 @@ function planBody(){ document.querySelectorAll('.subnav button').forEach(b=>{});
 
 function planGoals(){
   const goals=pf(M.goals).filter(g=>g.target);
+  const surplus=monthlySurplus(), prem=selfPremiums();
+  if(SCEN.goal.monthly==null) SCEN.goal.monthly=Math.max(0,surplus);
   let h=`<div class="card"><h2>Goals — funding progress</h2>${goals.length?goals.map(g=>goalBar(g)).join(''):'<p class="muted">No goals yet.</p>'}</div>`;
+  // goal-seek planner
+  h+=`<div class="card"><h2>Goal planner — how long to reach a target</h2>
+    <p class="muted" style="margin-bottom:12px">Your current monthly surplus (income − spending) is <b class="${valCls(surplus)}">${(surplus<0?'−':'+')+sgd0(Math.abs(surplus))}</b> across your statement history. Enter a target and see how long it takes.</p>
+    <div class="drow"><span class="k">Target amount</span><span>${nInput('goal','target',SCEN.goal.target,5000)}</span></div>
+    <div class="drow"><span class="k">Monthly contribution</span><span>${nInput('goal','monthly',SCEN.goal.monthly,250)}</span></div>
+    <div class="drow"><span class="k">Expected return % / yr</span><span>${nInput('goal','ret',SCEN.goal.ret,0.5)}</span></div>
+    <div id="goalOut" style="margin-top:14px"></div>
+    ${prem>0?`<div class="flagline" style="margin-top:12px"><span class="dot dot-warn"></span><span>You commit <b>${sgd0(prem)}/yr</b> in insurance premiums — keep these funded on time so cover doesn’t lapse before you fund this goal.</span></div>`:''}
+  </div>`;
   if(M.tax){ h+=`<div class="card"><h2>Tax &amp; SRS</h2><p>SRS cap ${sgd0(M.tax.srs_cap||35700)}${M.tax.srs_contributed_ytd!=null?` · contributed ${sgd0(M.tax.srs_contributed_ytd)}`:''}. <span class="muted">${esc(M.tax.notes||'')}</span></p></div>`; }
   if(M.estate){ const e=M.estate; const item=(ok,l)=>`<div class="flagline"><span class="dot dot-${ok?'ok':'danger'}"></span><span>${l}</span></div>`;
     h+=`<div class="card"><h2>Estate</h2>${item(e.will_sg,'SG will')}${item(e.will_india,'India will')}${item(e.guardianship_documented,'Guardianship documented')}${item(e.beneficiaries_checked,'Beneficiaries checked')}<p class="caption muted" style="margin-top:6px">${esc(e.notes||'')}</p></div>`; }
   $('#planbody').innerHTML=h;
+  computeGoal();
+}
+function computeGoal(){ const g=SCEN.goal; const r=(g.ret||0)/100; let bal=0, months=null;
+  for(let m=1;m<=1200;m++){ bal=bal*(1+r/12)+(g.monthly||0); if(bal>=g.target){months=m;break;} }
+  const out=$('#goalOut'); if(!out)return;
+  if(!g.monthly||g.monthly<=0){ out.innerHTML=`<div class="flagline"><span class="dot dot-danger"></span><span>With no monthly contribution you’ll never reach ${sgd0(g.target)} — free up cash flow or add a lump sum.</span></div>`; return; }
+  const yrs=months?Math.floor(months/12):null, mo=months?months%12:null;
+  out.innerHTML=`<div class="kpis" style="margin:0">
+    ${kpi('Time to reach', months==null?'100+ yrs':(yrs?yrs+'y ':'')+mo+'m', sgd0(g.monthly)+'/mo at '+g.ret+'%')}
+    ${kpi('Target', sgd0(g.target))}
+    ${kpi('Total contributed', sgd0((g.monthly||0)*(months||0)), months?`over ${months} months`:'')}</div>`;
 }
 const nInput=(g,k,v,step)=>`<input type="number" step="${step||1}" value="${v}" oninput="SI.scenIn('${g}','${k}',this.value)" style="width:130px;text-align:right">`;
 function planFire(){
