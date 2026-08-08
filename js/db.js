@@ -140,6 +140,10 @@ export async function addValuation(holdingId, asOf, value, currency){
   if(data) await supabase.from('holdings').update({value_local:data.value_local, as_of:data.as_of}).eq('id',holdingId);
 }
 export async function updatePolicy(id, patch){ const {error}=await supabase.from('policies').update(patch).eq('id',id); if(error) throw error; }
+// generic single-row CRUD for balance-sheet entities
+export async function insertOne(table, row){ const {data,error}=await supabase.from(table).insert({...row, household_id:HH}).select().maybeSingle(); if(error) throw error; return data; }
+export async function updateRow(table, id, patch){ const {error}=await supabase.from(table).update(patch).eq('id',id); if(error) throw error; }
+export async function deleteRow(table, id){ const {error}=await supabase.from(table).delete().eq('id',id); if(error) throw error; }
 export async function createSnapshot(row){ const {error}=await supabase.from('snapshots').insert({...row, household_id:HH}); if(error) throw error; }
 
 // ---- imported files + duplicate protection ----

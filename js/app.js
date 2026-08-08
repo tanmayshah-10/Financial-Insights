@@ -390,6 +390,61 @@ function donut(entries,total){ if(!entries.length)return '';
   const legend=entries.map(([c,v],i)=>`<div class="lg"><span class="sw" style="background:${RAMP[i%RAMP.length]}"></span><span class="lg-l">${c}</span><span class="lg-v">${sgd0(v)} · ${pct(v,total)}%</span></div>`).join('');
   return `<div class="donutwrap"><svg viewBox="0 0 128 128" width="128" height="128">${arcs}<text x="64" y="60" text-anchor="middle" font-size="10" fill="var(--ink-3)">Total</text><text x="64" y="76" text-anchor="middle" font-size="13" font-weight="600" fill="var(--heading)">${sgd0(total).replace('SGD ','')}</text></svg><div class="legend">${legend}</div></div>`; }
 
+// ---- generic entity editor (cash / property / liability / goal) ----
+const CCYS=['SGD','USD','EUR','INR','GBP','AUD','JPY','KRW','HKD','THB'];
+const OWNERS=[['tanmay','Mine'],['urvi','Urvi'],['joint','Joint']];
+function fld(f,val){ val=val==null?'':val;
+  if(f.t==='ccy') return `<select id="ed_${f.k}">${CCYS.map(c=>`<option ${c===(val||'SGD')?'selected':''}>${c}</option>`).join('')}</select>`;
+  if(f.t==='owner') return `<select id="ed_${f.k}">${OWNERS.map(([o,l])=>`<option value="${o}" ${o===(val||'tanmay')?'selected':''}>${l}</option>`).join('')}</select>`;
+  if(f.t==='select') return `<select id="ed_${f.k}">${f.opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select>`;
+  return `<input id="ed_${f.k}" type="${f.t}" value="${esc(String(val))}" style="width:160px${f.t==='number'?';text-align:right':''}">`;
+}
+const EDITORS={
+  cash:{table:'cash_accounts',coll:'cashAccounts',title:'Cash account',nameKey:'nickname',fields:[
+    {k:'nickname',l:'Nickname',t:'text'},{k:'institution',l:'Institution',t:'text'},{k:'account_type',l:'Type (Savings/FD…)',t:'text'},
+    {k:'balance',l:'Balance',t:'number'},{k:'currency',l:'Currency',t:'ccy'},{k:'yield_rate',l:'Yield % p.a.',t:'number'},
+    {k:'owner',l:'Owner',t:'owner'},{k:'as_of',l:'As of',t:'date'}]},
+  property:{table:'real_estate',coll:'realEstate',title:'Property',nameKey:'name',fields:[
+    {k:'name',l:'Name',t:'text'},{k:'location',l:'Location',t:'text'},{k:'property_type',l:'Type',t:'text'},
+    {k:'status',l:'Status',t:'select',opts:['watchlist','under-contract','owned']},
+    {k:'property_value',l:'Value',t:'number'},{k:'loan_outstanding',l:'Loan outstanding',t:'number'},
+    {k:'emi',l:'EMI / mo',t:'number'},{k:'currency',l:'Currency',t:'ccy'},{k:'owner',l:'Owner',t:'owner'}]},
+  liability:{table:'liabilities',coll:'liabilities',title:'Liability',nameKey:'name',fields:[
+    {k:'name',l:'Name',t:'text'},{k:'liability_type',l:'Type (Mortgage/Loan…)',t:'text'},{k:'lender',l:'Lender',t:'text'},
+    {k:'outstanding',l:'Outstanding',t:'number'},{k:'interest_rate',l:'Rate % p.a.',t:'number'},
+    {k:'emi',l:'EMI / mo',t:'number'},{k:'currency',l:'Currency',t:'ccy'},{k:'owner',l:'Owner',t:'owner'}]},
+  goal:{table:'goals',coll:'goals',title:'Goal',nameKey:'name',fields:[
+    {k:'name',l:'Name',t:'text'},{k:'target',l:'Target',t:'number'},{k:'current_override',l:'Current (leave blank to auto)',t:'number'},
+    {k:'horizon',l:'Target date',t:'date'},{k:'owner',l:'Owner',t:'owner'}]},
+};
+function openEditor(type,id){ const spec=EDITORS[type]; const row= id?M[spec.coll].find(x=>x.id===id):{};
+  $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>${id?'Edit':'Add'} ${spec.title.toLowerCase()}</h3>
+    ${spec.fields.map(f=>`<div class="drow"><span class="k">${f.l}</span><span>${fld(f,row?.[f.k])}</span></div>`).join('')}
+    <div class="fbtns"><button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.saveEditor('${type}','${id||''}')">Save</button>
+    ${id?`<button class="fb" style="color:var(--neg)" onclick="SI.deleteEntity('${type}','${id}')">Delete</button>`:''}</div>
+    <div id="edMsg" class="caption" style="margin-top:6px"></div>`;
+  $('#ov').classList.add('show');
+}
+async function saveEditor(type,id){ const spec=EDITORS[type]; const patch={};
+  spec.fields.forEach(f=>{ let v=$('#ed_'+f.k)?.value; if(f.t==='number') v=(v===''?null:parseFloat(v)); else if(v==='') v=null; patch[f.k]=v; });
+  if(spec.fields.some(f=>f.k==='as_of') && !patch.as_of) patch.as_of=today();
+  if(!id){ const nm=(patch[spec.nameKey]||'').toString().toLowerCase();
+    const dup=M[spec.coll].find(x=>(x[spec.nameKey]||'').toString().toLowerCase()===nm && x.owner===patch.owner && nm);
+    if(dup){ $('#edMsg').textContent=`A ${spec.title.toLowerCase()} named “${patch[spec.nameKey]}” already exists for this owner — edit that instead of adding a duplicate.`; $('#edMsg').className='caption val-neg'; return; } }
+  try{ if(id) await db.updateRow(spec.table,id,patch); else await db.insertOne(spec.table,patch); await reload(); render(); closeSheet(); toast(`${spec.title} ${id?'updated':'added'}`); }
+  catch(e){ $('#edMsg').textContent='Error: '+(e.message||e); $('#edMsg').className='caption val-neg'; }
+}
+function deleteEntity(type,id){ const spec=EDITORS[type]; confirmSheet(`Delete this ${spec.title.toLowerCase()}?`, async()=>{ await db.deleteRow(spec.table,id); await reload(); render(); toast(`${spec.title} deleted`); }); }
+async function toggleEstate(field){ const base={...(M.estate||{})}; delete base.household_id; base[field]=!base[field]; await db.upsertSingle('estate_state', base); await reload(); render(); }
+async function saveTax(){ const v=$('#taxSrs').value===''?null:parseFloat($('#taxSrs').value); const base={...(M.tax||{})}; delete base.household_id; base.srs_contributed_ytd=v; if(base.srs_cap==null)base.srs_cap=35700; await db.upsertSingle('tax_state', base); await reload(); render(); toast('SRS updated'); }
+// section card with rows + Add button
+function bsSection(title, coll, type, rowFn, accent){ const items=pf(M[coll]);
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${items.length?'8px':'0'}"><h2 style="margin:0">${title}${items.length?' · '+items.length:''}</h2><button class="btn sm" onclick="SI.addEntity('${type}')">+ Add</button></div>`;
+  if(items.length){ h+=`<table><tbody>`; items.forEach(it=>h+=rowFn(it)); h+=`</tbody></table>`; }
+  else h+=`<p class="caption muted" style="margin-top:8px">None yet — add one to include it in your net worth.</p>`;
+  return h+`</div>`;
+}
+
 // ---- per-tab insights: "what the data shows & what to consider" ----
 function insightCard(area){ const items=insightsFor(area); if(!items.length) return '';
   return `<div class="card"><h2><span class="dotmark" style="background:var(--accent)"></span>Insights — what to consider</h2>`+
@@ -476,7 +531,13 @@ function wealthView(){
       <td class="num ${si?valCls(si.gain):''}">${si?signed(si.gain)+' · '+(si.pct>=0?'+':'')+si.pct.toFixed(0)+'%':'—'}</td>
       <td>${freshPill(hd.as_of)}</td></tr>`; });
   h+=`</tbody></table></div>`;
-  if(pf(M.liabilities).length){ h+=`<div class="card"><h2>Liabilities</h2><table><tbody>`+pf(M.liabilities).map(l=>`<tr><td>${esc(l.name||l.liability_type)}</td><td class="num val-neg">−${sgd0(toSGD(l.outstanding,l.currency))}</td></tr>`).join('')+`</tbody></table></div>`; }
+  // cash accounts
+  h+=bsSection('Cash &amp; deposits','cashAccounts','cash', a=>`<tr style="cursor:pointer" onclick="SI.editEntity('cash','${a.id}')"><td>${esc(a.nickname||a.institution||'Account')}<div class="caption muted">${esc(a.account_type||'')}${a.as_of?' · updated '+dfull(a.as_of):''}</div></td><td class="caption">${a.owner}</td><td class="num">${sgd0(toSGD(a.balance,a.currency))}</td></tr>`);
+  // real estate
+  h+=bsSection('Property','realEstate','property', p=>{const eq=(p.status!=='watchlist')?toSGD(p.property_value,p.currency)-toSGD(p.loan_outstanding,p.currency):0;
+    return `<tr style="cursor:pointer" onclick="SI.editEntity('property','${p.id}')"><td>${esc(p.name||'Property')}<div class="caption muted">${esc(p.location||'')} · ${p.status}</div></td><td class="caption">${p.owner}</td><td class="num">${p.status==='watchlist'?'<span class="muted">watchlist</span>':sgd0(eq)+' <span class="caption muted">equity</span>'}</td></tr>`;});
+  // liabilities
+  h+=bsSection('Liabilities','liabilities','liability', l=>`<tr style="cursor:pointer" onclick="SI.editEntity('liability','${l.id}')"><td>${esc(l.name||l.liability_type||'Liability')}<div class="caption muted">${esc(l.lender||'')}${l.interest_rate?' · '+l.interest_rate+'%':''}</div></td><td class="caption">${l.owner}</td><td class="num val-neg">−${sgd0(toSGD(l.outstanding,l.currency))}</td></tr>`);
   $('#view').innerHTML=h;
 }
 // holding detail sheet
@@ -642,7 +703,7 @@ function planGoals(){
   const goals=pf(M.goals).filter(g=>g.target);
   const surplus=monthlySurplus(), prem=selfPremiums();
   if(SCEN.goal.monthly==null) SCEN.goal.monthly=Math.max(0,surplus);
-  let h=`<div class="card"><h2>Goals — funding progress</h2>${goals.length?goals.map(g=>goalBar(g)).join(''):'<p class="muted">No goals yet.</p>'}</div>`;
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${goals.length?'6px':'0'}"><h2 style="margin:0">Goals — funding progress</h2><button class="btn sm" onclick="SI.addEntity('goal')">+ Add</button></div>${goals.length?goals.map(g=>`<div style="cursor:pointer" onclick="SI.editEntity('goal','${g.id}')">${goalBar(g)}</div>`).join(''):'<p class="muted" style="margin-top:8px">No goals yet.</p>'}</div>`;
   // goal-seek planner
   h+=`<div class="card"><h2>Goal planner — how long to reach a target</h2>
     <p class="muted" style="margin-bottom:12px">Your current monthly surplus (income − spending) is <b class="${valCls(surplus)}">${(surplus<0?'−':'+')+sgd0(Math.abs(surplus))}</b> across your statement history. Enter a target and see how long it takes.</p>
@@ -652,9 +713,11 @@ function planGoals(){
     <div id="goalOut" style="margin-top:14px"></div>
     ${prem>0?`<div class="flagline" style="margin-top:12px"><span class="dot dot-warn"></span><span>You commit <b>${sgd0(prem)}/yr</b> in insurance premiums — keep these funded on time so cover doesn’t lapse before you fund this goal.</span></div>`:''}
   </div>`;
-  if(M.tax){ h+=`<div class="card"><h2>Tax &amp; SRS</h2><p>SRS cap ${sgd0(M.tax.srs_cap||35700)}${M.tax.srs_contributed_ytd!=null?` · contributed ${sgd0(M.tax.srs_contributed_ytd)}`:''}. <span class="muted">${esc(M.tax.notes||'')}</span></p></div>`; }
-  if(M.estate){ const e=M.estate; const item=(ok,l)=>`<div class="flagline"><span class="dot dot-${ok?'ok':'danger'}"></span><span>${l}</span></div>`;
-    h+=`<div class="card"><h2>Estate</h2>${item(e.will_sg,'SG will')}${item(e.will_india,'India will')}${item(e.guardianship_documented,'Guardianship documented')}${item(e.beneficiaries_checked,'Beneficiaries checked')}<p class="caption muted" style="margin-top:6px">${esc(e.notes||'')}</p></div>`; }
+  h+=`<div class="card"><h2>Tax &amp; SRS</h2>
+    <div class="drow"><span class="k">SRS contributed this year</span><span><input id="taxSrs" type="number" value="${M.tax?.srs_contributed_ytd??''}" style="width:130px;text-align:right"> <button class="btn sm" onclick="SI.saveTax()">Save</button></span></div>
+    <p class="caption muted" style="margin-top:6px">Cap ${sgd0(M.tax?.srs_cap||35700)}/yr. ${esc(M.tax?.notes||'')}</p></div>`;
+  { const e=M.estate||{}; const item=(ok,l,f)=>`<div class="flagline" style="cursor:pointer" onclick="SI.toggleEstate('${f}')"><span class="dot dot-${ok?'ok':'danger'}"></span><span>${l} <span class="caption muted">${ok?'✓ done':'tap when done'}</span></span></div>`;
+    h+=`<div class="card"><h2>Estate — tap to update</h2>${item(e.will_sg,'SG will','will_sg')}${item(e.will_india,'India will','will_india')}${item(e.guardianship_documented,'Guardianship documented','guardianship_documented')}${item(e.beneficiaries_checked,'Beneficiaries checked','beneficiaries_checked')}<p class="caption muted" style="margin-top:6px">${esc(e.notes||'')}</p></div>`; }
   $('#planbody').innerHTML=h;
   computeGoal();
 }
@@ -795,7 +858,8 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  saveHoldingValue, savePolicy, planTab, scenIn, ask };
+  saveHoldingValue, savePolicy, planTab, scenIn, ask,
+  addEntity:t=>openEditor(t), editEntity:(t,id)=>openEditor(t,id), saveEditor, deleteEntity, toggleEstate, saveTax };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };
