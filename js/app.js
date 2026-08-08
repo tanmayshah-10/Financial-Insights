@@ -110,7 +110,7 @@ const CF_TABS=['overview','insights','transactions','review','import'];
 const mountEl=()=>AREA==='cashflow'?'#cfbody':'#view';
 function renderShell(){
   app.innerHTML=`<div class="top"><div class="topin">
-      <div class="brand"><span class="brand-mark"></span>Shah Financial Insights</div>
+      <div class="brand">Shah Financial Insights</div>
       <nav id="nav"></nav>
       <div class="topright">
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
