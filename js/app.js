@@ -15,7 +15,7 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new Set(),
           holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
-          snapshots:[], tags:[], fx:{}, tax:null, estate:null };
+          snapshots:[], tags:[], accounts:[], valuations:[], fx:{}, tax:null, estate:null };
 let catIcon={}, catFlags={}, HHID=null;
 let AREA='home', profile='tanmay';
 let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='';
@@ -465,7 +465,11 @@ function wealthView(){
     <div style="display:flex;gap:8px"><button class="btn" onclick="SI.quickUpdate()">Quick-update values</button><button class="btn pri" onclick="SI.snapshot()">Take snapshot</button></div></div>
     <div class="kpis">${kpi('Net worth',sgd0(nw.total))}${kpi('Investments',sgd0(nw.holdings))}${kpi('Cash',sgd0(nw.cash))}${kpi('Property equity',sgd0(nw.realEstate))}</div>`;
   h+=insightCard('wealth');
-  h+=`<div class="card"><h2>Investments · ${hs.length}</h2><table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>As of</th></tr></thead><tbody>`;
+  const stale=hs.filter(hd=>{const a=NW.dataFreshness(hd.as_of);return a.days!=null&&a.days>180;}).length;
+  const oldest=hs.map(hd=>hd.as_of).filter(Boolean).sort()[0];
+  h+=`<div class="card"><h2>Investments · ${hs.length}</h2>
+    <p class="caption" style="margin:-6px 0 10px">${oldest?`Oldest value from ${dfull(oldest)}.`:''} ${stale?`<span class="val-neg">${stale} not refreshed in 180+ days</span> — click a holding to update.`:'All values reasonably fresh.'}</p>
+    <table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>Updated</th></tr></thead><tbody>`;
   hs.forEach(hd=>{ const v=toSGD(hd.value_local,hd.currency); const si=NW.sinceInception(hd,M.fx);
     h+=`<tr style="cursor:pointer" onclick="SI.holding('${hd.id}')"><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''}${hd.currency!=='SGD'?' · '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
       <td class="caption">${hd.owner}</td><td class="num">${sgd0(v)}</td>
@@ -476,19 +480,43 @@ function wealthView(){
   $('#view').innerHTML=h;
 }
 // holding detail sheet
+const valsFor=id=>M.valuations.filter(v=>v.holding_id===id).sort((a,b)=>a.as_of.localeCompare(b.as_of));
+function sparkline(vals){ if(vals.length<2)return '';
+  const W=180,H=36,xs=vals.map((v,i)=>i),ys=vals.map(v=>+v.value_local),max=Math.max(...ys),min=Math.min(...ys);
+  const x=i=>i*(W-4)/(vals.length-1)+2, y=v=>H-2-((v-min)/((max-min)||1))*(H-4);
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block"><polyline points="${vals.map((v,i)=>x(i)+','+y(+v.value_local)).join(' ')}" fill="none" stroke="var(--area)" stroke-width="1.5"/></svg>`;}
+const today=()=>{const d=new Date(); const p=n=>String(n).padStart(2,'0'); return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate());};
 function openHolding(id){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return; const si=NW.sinceInception(hd,M.fx); const v=toSGD(hd.value_local,hd.currency);
   const row=(k,val)=>`<div class="drow"><span class="k">${k}</span><span class="v2">${val}</span></div>`;
+  const vals=valsFor(id);
+  const hist=vals.length?`<div class="card" style="box-shadow:none;border:none;padding:0;margin-top:14px"><h2>Value history</h2>${sparkline(vals)}
+    <table style="margin-top:6px"><tbody>${vals.slice().reverse().slice(0,6).map((x,i,arr)=>{const prev=arr[i+1];const chg=prev?(+x.value_local-+prev.value_local):0;
+      return `<tr><td class="caption">${dfull(x.as_of)}</td><td class="num">${x.currency||hd.currency} ${(+x.value_local).toLocaleString()}</td><td class="num ${valCls(chg)}">${prev?signed(chg).replace('SGD ',''):''}</td></tr>`;}).join('')}</tbody></table></div>`:'';
   $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button>
     <h3 style="margin-bottom:2px">${esc(hd.platform)}</h3><div class="muted" style="margin-bottom:10px">${hd.subtype||''}</div>
     ${row('Value', `${sgd0(v)}${hd.currency!=='SGD'?` <span class="muted">(${hd.currency} ${Math.round(hd.value_local).toLocaleString()})</span>`:''}`)}
     ${si?row('Since inception', `<span class="${valCls(si.gain)}">${signed(si.gain)} · ${si.pct>=0?'+':''}${si.pct.toFixed(1)}%</span>`):''}
     ${si?row('Contributed', sgd0(si.cost)):''}
     ${row('Owner', hd.owner)}${row('Category', hd.category||'—')}${hd.account?row('Account', esc(hd.account)):''}
-    ${row('As of', hd.as_of?dfull(hd.as_of)+' · '+NW.dataFreshness(hd.as_of).label:'—')}
+    ${row('Updated on', hd.as_of?dfull(hd.as_of)+' · '+freshPill(hd.as_of):'—')}
     ${hd.tags?.length?row('Tags', hd.tags.map(t=>`<span class="chip">${t}</span>`).join(' ')):''}
     ${hd.notes?`<p class="caption" style="margin-top:12px;color:var(--ink-2)">${esc(hd.notes)}</p>`:''}
-    <div class="fbtns"><button class="fb" onclick="SI.quickUpdate('${hd.id}')">Update value</button></div>`;
+    <div class="card" style="box-shadow:none;border:1px solid var(--hairline);margin-top:14px"><h2>Update value</h2>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div><label class="caption">New value (${hd.currency})</label><br><input id="hvVal" type="number" value="${hd.value_local??''}" style="width:140px;text-align:right"></div>
+        <div><label class="caption">As of</label><br><input id="hvDate" type="date" value="${today()}" style="width:150px"></div>
+        <button class="btn pri" onclick="SI.saveHoldingValue('${id}')">Save</button>
+      </div><div id="hvMsg" class="caption" style="margin-top:8px"></div></div>
+    ${hist}`;
   $('#ov').classList.add('show');
+}
+async function saveHoldingValue(id){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return;
+  const val=parseFloat($('#hvVal').value), d=$('#hvDate').value;
+  if(isNaN(val)||!d){ $('#hvMsg').textContent='Enter a value and date.'; $('#hvMsg').className='caption val-neg'; return; }
+  const dup=valsFor(id).find(x=>x.as_of===d && +x.value_local===val);
+  if(dup){ $('#hvMsg').textContent='Same value already recorded for that date — no change.'; $('#hvMsg').className='caption'; return; }
+  try{ await db.addValuation(id, d, val, hd.currency); await reload(); render(); openHolding(id); toast('Value updated · '+dfull(d)); }
+  catch(e){ $('#hvMsg').textContent='Error: '+(e.message||e); $('#hvMsg').className='caption val-neg'; }
 }
 // Quick-update NAVs (bulk) — the monthly refresh workflow
 function openQuickUpdate(focusId){ const hs=pf(M.holdings);
@@ -504,7 +532,7 @@ function openQuickUpdate(focusId){ const hs=pf(M.holdings);
 async function saveQuickUpdate(){ const hs=pf(M.holdings); let n=0;
   for(const hd of hs){ const vEl=$('#qv_'+hd.id), dEl=$('#qd_'+hd.id); if(!vEl)continue;
     const nv=vEl.value===''?null:parseFloat(vEl.value); const nd=dEl.value||null;
-    if(nv!==hd.value_local || nd!==hd.as_of){ await db.updateHolding(hd.id,{value_local:nv, as_of:nd}); n++; } }
+    if(nv!=null && nd && (nv!==hd.value_local || nd!==hd.as_of)){ await db.addValuation(hd.id, nd, nv, hd.currency); n++; } }
   closeSheet(); await reload(); render(); toast(n?`Updated ${n} holding value(s)`:'No changes');
 }
 async function takeSnapshot(){ const nw=NW.netWorth(M,'household');
@@ -735,7 +763,7 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  planTab, scenIn, ask };
+  saveHoldingValue, planTab, scenIn, ask };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };

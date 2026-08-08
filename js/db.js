@@ -22,14 +22,14 @@ const q = (t,cols='*')=>supabase.from(t).select(cols).eq('household_id',HH);
 export async function loadAll(){
   const [tx, cats, rules, files, aliases,
          holdings, policies, goals, realEstate, cashAccounts, liabilities,
-         settings, taxState, estateState, snapshots, tags, accounts] = await Promise.all([
+         settings, taxState, estateState, snapshots, tags, accounts, valuations] = await Promise.all([
     q('transactions').order('txn_date',{ascending:false}),
     q('categories').order('sort'), q('rules'),
     supabase.from('imported_files').select('account,filename,content_hash').eq('household_id',HH),
     q('category_aliases','from_name,to_name'),
     q('holdings'), q('policies'), q('goals'), q('real_estate'), q('cash_accounts'), q('liabilities'),
     q('household_settings').maybeSingle(), q('tax_state').maybeSingle(), q('estate_state').maybeSingle(),
-    q('snapshots').order('created_at'), q('tags'), q('accounts'),
+    q('snapshots').order('created_at'), q('tags'), q('accounts'), q('holding_valuations').order('as_of'),
   ]);
   let categories = cats.data || [];
   if (!categories.length) categories = await seedCategories();
@@ -43,7 +43,7 @@ export async function loadAll(){
     fileHashes: new Set((files.data||[]).map(f=>f.content_hash).filter(Boolean)),
     holdings: holdings.data||[], policies: policies.data||[], goals: goals.data||[],
     realEstate: realEstate.data||[], cashAccounts: cashAccounts.data||[], liabilities: liabilities.data||[],
-    snapshots: snapshots.data||[], tags: tags.data||[], accounts: accounts.data||[],
+    snapshots: snapshots.data||[], tags: tags.data||[], accounts: accounts.data||[], valuations: valuations.data||[],
     fx: s.fx || {USD_SGD:1.275,EUR_SGD:1.47,INR_SGD:0.0156,GBP_SGD:1.72},
     profiles: s.profiles || {}, kids: s.kids || [], emergencyMonths: s.emergency_fund_months ?? 6,
     tax: taxState.data || null, estate: estateState.data || null,
@@ -130,6 +130,15 @@ export async function renameCategory(oldName, newName){
 
 // ---- balance-sheet edits (Phase 2) ----
 export async function updateHolding(id, patch){ const {error}=await supabase.from('holdings').update(patch).eq('id',id); if(error) throw error; }
+// record a value on a date (dedup via PK), then set the holding to its LATEST valuation
+export async function addValuation(holdingId, asOf, value, currency){
+  const { error } = await supabase.from('holding_valuations')
+    .upsert({household_id:HH, holding_id:holdingId, as_of:asOf, value_local:value, currency},{onConflict:'holding_id,as_of'});
+  if(error) throw error;
+  const { data } = await supabase.from('holding_valuations').select('as_of,value_local')
+    .eq('holding_id',holdingId).order('as_of',{ascending:false}).limit(1).maybeSingle();
+  if(data) await supabase.from('holdings').update({value_local:data.value_local, as_of:data.as_of}).eq('id',holdingId);
+}
 export async function updatePolicy(id, patch){ const {error}=await supabase.from('policies').update(patch).eq('id',id); if(error) throw error; }
 export async function createSnapshot(row){ const {error}=await supabase.from('snapshots').insert({...row, household_id:HH}); if(error) throw error; }
 
