@@ -347,8 +347,16 @@ async function toggleFlag(id,type){const t=M.tx.find(x=>x.id===id);if(!t)return;
 async function del(id){await db.deleteTransaction(id);await reload();closeSheet();render();}
 async function approve(id,close){await db.patchTransaction(id,{review:false});await reload();if(close)closeSheet();render();}
 async function approveAll(){await db.approveAllReview();await reload();render();}
-async function deleteReview(){if(confirm('Delete all review-queue rows?')){await db.deleteWhereReview();await reload();render();}}
-async function clearAll(){if(confirm('Clear ALL transactions for the household? (Categories kept.)')){await db.clearAllTransactions();M.files=new Set();M.fileHashes=new Set();await reload();render();}}
+function deleteReview(){ confirmSheet('Delete all review-queue rows?', async()=>{ await db.deleteWhereReview(); await reload(); render(); }); }
+function clearAll(){ confirmSheet('Clear ALL transactions for the household? (Categories are kept.)', async()=>{ await db.clearAllTransactions(); M.files=new Set(); M.fileHashes=new Set(); await reload(); render(); }); }
+// in-app confirm (native confirm() is blocked in the embedded browser)
+function confirmSheet(msg,onYes){
+  $('#sheet').innerHTML=`<h3 style="margin-bottom:8px">Confirm</h3><p class="muted">${esc(msg)}</p>
+    <div class="fbtns"><button class="fb" onclick="SI.close()">Cancel</button>
+    <button class="fb" id="cfmYes" style="background:var(--neg);color:#fff;border-color:var(--neg)">Yes, proceed</button></div>`;
+  $('#ov').classList.add('show');
+  $('#cfmYes').onclick=async()=>{ closeSheet(); await onYes(); };
+}
 function exportCSV(){ const head='date,amount,direction,category,account,merchant\n';
   const body=M.tx.map(t=>`${t.txn_date},${t.amount},${t.direction},${t.category},${t.account},"${(t.merchant||'').replace(/"/g,'')}"`).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([head+body],{type:'text/csv'})); a.download='transactions.csv'; a.click(); }
@@ -374,7 +382,8 @@ function homeView(){
   const months=[...new Set(counted().map(t=>t.txn_date.slice(0,7)))].sort();
   const lm=months[months.length-1];
   const mt=lm?counted().filter(t=>t.txn_date.slice(0,7)===lm):[];
-  const inn=mt.filter(t=>t.direction==='in'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
+  const NOFLOW=new Set(['Transfer','Refund']);   // internal movements excluded; Income counts as money-in
+  const inn=mt.filter(t=>t.direction==='in'&&!NOFLOW.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const out=mt.filter(t=>t.direction==='out'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
   const save= inn? Math.round((inn-out)/inn*100):null;
   const topAlloc=alloc[0], topPct=nw.holdings?Math.round(topAlloc?.[1]/nw.holdings*100):0;
@@ -411,11 +420,12 @@ function trendNW(snaps){ const s=snaps.slice().sort((a,b)=>(a.created_at||'').lo
 function wealthView(){
   const nw=NW.netWorth(M,profile);
   const hs=pf(M.holdings).sort((a,b)=>toSGD(b.value_local,b.currency)-toSGD(a.value_local,a.currency));
-  let h=`<div class="pagehead"><h1>Wealth</h1></div>
+  let h=`<div class="pagehead" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px"><h1>Wealth</h1>
+    <div style="display:flex;gap:8px"><button class="btn" onclick="SI.quickUpdate()">Quick-update values</button><button class="btn pri" onclick="SI.snapshot()">Take snapshot</button></div></div>
     <div class="kpis">${kpi('Net worth',sgd0(nw.total))}${kpi('Investments',sgd0(nw.holdings))}${kpi('Cash',sgd0(nw.cash))}${kpi('Property equity',sgd0(nw.realEstate))}</div>`;
-  h+=`<div class="card"><h2>Investments</h2><table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>As of</th></tr></thead><tbody>`;
+  h+=`<div class="card"><h2>Investments · ${hs.length}</h2><table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>As of</th></tr></thead><tbody>`;
   hs.forEach(hd=>{ const v=toSGD(hd.value_local,hd.currency); const si=NW.sinceInception(hd,M.fx);
-    h+=`<tr><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''} ${hd.currency!=='SGD'?'· '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
+    h+=`<tr style="cursor:pointer" onclick="SI.holding('${hd.id}')"><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''}${hd.currency!=='SGD'?' · '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
       <td class="caption">${hd.owner}</td><td class="num">${sgd0(v)}</td>
       <td class="num ${si?valCls(si.gain):''}">${si?signed(si.gain)+' · '+(si.pct>=0?'+':'')+si.pct.toFixed(0)+'%':'—'}</td>
       <td>${freshPill(hd.as_of)}</td></tr>`; });
@@ -423,17 +433,75 @@ function wealthView(){
   if(pf(M.liabilities).length){ h+=`<div class="card"><h2>Liabilities</h2><table><tbody>`+pf(M.liabilities).map(l=>`<tr><td>${esc(l.name||l.liability_type)}</td><td class="num val-neg">−${sgd0(toSGD(l.outstanding,l.currency))}</td></tr>`).join('')+`</tbody></table></div>`; }
   $('#view').innerHTML=h;
 }
+// holding detail sheet
+function openHolding(id){ const hd=M.holdings.find(x=>x.id===id); if(!hd)return; const si=NW.sinceInception(hd,M.fx); const v=toSGD(hd.value_local,hd.currency);
+  const row=(k,val)=>`<div class="drow"><span class="k">${k}</span><span class="v2">${val}</span></div>`;
+  $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button>
+    <h3 style="margin-bottom:2px">${esc(hd.platform)}</h3><div class="muted" style="margin-bottom:10px">${hd.subtype||''}</div>
+    ${row('Value', `${sgd0(v)}${hd.currency!=='SGD'?` <span class="muted">(${hd.currency} ${Math.round(hd.value_local).toLocaleString()})</span>`:''}`)}
+    ${si?row('Since inception', `<span class="${valCls(si.gain)}">${signed(si.gain)} · ${si.pct>=0?'+':''}${si.pct.toFixed(1)}%</span>`):''}
+    ${si?row('Contributed', sgd0(si.cost)):''}
+    ${row('Owner', hd.owner)}${row('Category', hd.category||'—')}${hd.account?row('Account', esc(hd.account)):''}
+    ${row('As of', hd.as_of?dfull(hd.as_of)+' · '+NW.dataFreshness(hd.as_of).label:'—')}
+    ${hd.tags?.length?row('Tags', hd.tags.map(t=>`<span class="chip">${t}</span>`).join(' ')):''}
+    ${hd.notes?`<p class="caption" style="margin-top:12px;color:var(--ink-2)">${esc(hd.notes)}</p>`:''}
+    <div class="fbtns"><button class="fb" onclick="SI.quickUpdate('${hd.id}')">Update value</button></div>`;
+  $('#ov').classList.add('show');
+}
+// Quick-update NAVs (bulk) — the monthly refresh workflow
+function openQuickUpdate(focusId){ const hs=pf(M.holdings);
+  const rows=hs.map(hd=>`<div class="drow" style="gap:10px"><span style="flex:1">${esc(hd.platform)}<div class="caption muted">${hd.currency}</div></span>
+    <input id="qv_${hd.id}" type="number" value="${hd.value_local??''}" style="width:120px;text-align:right" placeholder="value">
+    <input id="qd_${hd.id}" type="date" value="${hd.as_of||''}" style="width:150px"></div>`).join('');
+  $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>Quick-update values</h3>
+    <p class="muted" style="margin:4px 0 12px">Enter latest value + date for each holding, then save. This is your monthly refresh.</p>
+    <div style="max-height:56vh;overflow:auto">${rows}</div>
+    <div class="fbtns"><button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.saveQuickUpdate()">Save all</button></div>`;
+  $('#ov').classList.add('show');
+}
+async function saveQuickUpdate(){ const hs=pf(M.holdings); let n=0;
+  for(const hd of hs){ const vEl=$('#qv_'+hd.id), dEl=$('#qd_'+hd.id); if(!vEl)continue;
+    const nv=vEl.value===''?null:parseFloat(vEl.value); const nd=dEl.value||null;
+    if(nv!==hd.value_local || nd!==hd.as_of){ await db.updateHolding(hd.id,{value_local:nv, as_of:nd}); n++; } }
+  closeSheet(); await reload(); render(); toast(n?`Updated ${n} holding value(s)`:'No changes');
+}
+async function takeSnapshot(){ const nw=NW.netWorth(M,'household');
+  const holdings=M.holdings.map(h=>({id:h.ext_id||h.id, platform:h.platform, owner:h.owner, valueLocal:h.value_local, currency:h.currency, valueSGD:toSGD(h.value_local,h.currency), asOf:h.as_of}));
+  const goals=M.goals.map(g=>({id:g.ext_id||g.id, target:g.target, current:NW.goalCurrentSGD(g,M.holdings,M.fx)}));
+  await db.createSnapshot({label:'Snapshot', total_wealth_sgd:nw.holdings, net_worth_sgd:nw.total, holdings, goals});
+  await reload(); render(); toast('Snapshot saved · net worth '+sgd0(nw.total));
+}
 
 function protectionView(){
   const cov=NW.coverTotals(M.policies,profile,M.fx);
   const ps=pf(M.policies);
+  const annualPrem=ps.reduce((s,p)=>s+premYr(p),0);
+  const empDeath=ps.filter(p=>/employer|SAP/i.test((p.insurer||'')+(p.notes||''))).reduce((s,p)=>s+toSGD(p.covers?.death||0,p.currency),0);
   let h=`<div class="pagehead"><h1>Protection</h1></div>
-    <div class="kpis">${kpi('Death',sgd0(cov.death))}${kpi('Critical illness',sgd0(cov.ci))}${kpi('TPD',sgd0(cov.tpd))}${kpi('Hospitalisation',sgd0(cov.hospital))}</div>`;
-  h+=`<div class="card"><h2>Policies</h2><table><thead><tr><th>Policy</th><th>Owner</th><th>Type</th><th class="num">Cover</th><th class="num">Premium/yr</th></tr></thead><tbody>`;
-  ps.forEach(p=>{ const c=p.covers||{}; const main=Math.max(c.death||0,c.ci||0,c.hospital||0); const prem=NW.toSGD(p.premium_freq==='monthly'?(p.premium*12):p.premium,p.premium_currency,M.fx);
-    h+=`<tr><td>${esc(p.insurer)} <span class="muted">${esc(p.product||'')}</span></td><td class="caption">${p.owner}</td><td class="caption">${p.type}</td><td class="num">${sgd0(toSGD(main,p.currency))}</td><td class="num">${prem?sgd0(prem):'—'}</td></tr>`; });
-  h+=`</tbody></table><p class="caption muted" style="margin-top:8px">Employer (SAP) group cover lapses on leaving — see Plan → Scenarios.</p></div>`;
+    <div class="kpis">${kpi('Death',sgd0(cov.death))}${kpi('Critical illness',sgd0(cov.ci))}${kpi('Hospitalisation',sgd0(cov.hospital))}${kpi('Premiums / yr',sgd0(annualPrem))}</div>`;
+  // gap analysis vs a simple rule of thumb
+  h+=`<div class="card"><h2>Coverage check</h2>`;
+  const gapTgt=2000000; // simple death-cover target; refine with income later
+  h+=`<div class="flagline"><span class="dot dot-${cov.death>=gapTgt?'ok':'warn'}"></span><span><b>Life cover ${sgd0(cov.death)}</b> vs a ~${sgd0(gapTgt)} guide — ${cov.death>=gapTgt?'adequate':'review'}.</span></div>`;
+  if(empDeath>0) h+=`<div class="flagline"><span class="dot dot-warn"></span><span><b>${sgd0(empDeath)}</b> of cover is employer (SAP) group — lapses on leaving. Standalone hospitalisation (Integrated Shield) is the main gap.</span></div>`;
+  h+=`</div>`;
+  h+=`<div class="card"><h2>Policies · ${ps.length}</h2><table><thead><tr><th>Policy</th><th>Owner</th><th>Type</th><th class="num">Cover</th><th class="num">Premium/yr</th></tr></thead><tbody>`;
+  ps.forEach(p=>{ const c=p.covers||{}; const main=Math.max(c.death||0,c.ci||0,c.hospital||0);
+    h+=`<tr style="cursor:pointer" onclick="SI.policy('${p.id}')"><td>${esc(p.insurer)} <span class="muted">${esc(p.product||'')}</span></td><td class="caption">${p.owner}</td><td class="caption">${p.type}</td><td class="num">${sgd0(toSGD(main,p.currency))}</td><td class="num">${sgd0(premYr(p))}</td></tr>`; });
+  h+=`</tbody></table></div>`;
   $('#view').innerHTML=h;
+}
+function premYr(p){ const mult=p.premium_freq==='monthly'?12:p.premium_freq==='quarterly'?4:p.premium_freq==='semi-annual'?2:1; return NW.toSGD((p.premium||0)*mult, p.premium_currency, M.fx); }
+function openPolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return; const c=p.covers||{};
+  const row=(k,v)=>`<div class="drow"><span class="k">${k}</span><span class="v2">${v}</span></div>`;
+  const cov=[['Death',c.death],['TPD',c.tpd],['Critical illness',c.ci],['Early CI',c.earlyCi],['Hospitalisation',c.hospital]].filter(([,v])=>v>0);
+  $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button>
+    <h3 style="margin-bottom:2px">${esc(p.insurer)}</h3><div class="muted" style="margin-bottom:10px">${esc(p.product||'')} · ${p.type}</div>
+    ${cov.map(([k,v])=>row(k, sgd0(toSGD(v,p.currency)))).join('')}
+    ${row('Premium', sgd0(premYr(p))+' / yr')}
+    ${row('Owner', p.owner)}${p.expiry?row('Expiry', esc(p.expiry)):''}${p.policy_number?row('Policy no.', esc(p.policy_number)):''}
+    ${p.notes?`<p class="caption" style="margin-top:12px;color:var(--ink-2)">${esc(p.notes)}</p>`:''}`;
+  $('#ov').classList.add('show');
 }
 
 function planView(){
@@ -503,7 +571,8 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');},
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
-  setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV };
+  setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
+  holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };

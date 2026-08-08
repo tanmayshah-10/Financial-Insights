@@ -2,22 +2,25 @@
 .center{min-height:80vh;display:flex;align-items:center;justify-content:center;padding:var(--s5)}
 .wrap{max-width:980px;margin:0 auto;padding:var(--s6) var(--s5) var(--s8)}
 .pagehead{margin:0 0 var(--s5)}
-.pagehead h1{font-size:40px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.pagehead h1{font-size:40px;font-weight:600;letter-spacing:-.02em;line-height:1.1;color:var(--heading)}
 .pagehead .muted{margin-top:4px}
 
-/* nav */
-.top{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.72);backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hairline)}
-:root[data-theme="dark"] .top{background:rgba(20,20,22,.72)}
-.topin{max-width:1080px;margin:0 auto;padding:0 var(--s5);display:flex;align-items:center;gap:var(--s5);height:52px}
-.brand{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+/* nav — a distinct deep ribbon */
+.top{position:sticky;top:0;z-index:30;background:var(--bar-bg);box-shadow:0 1px 0 rgba(0,0,0,.15)}
+.topin{max-width:1080px;margin:0 auto;padding:0 var(--s5);display:flex;align-items:center;gap:var(--s5);height:56px}
+.brand{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;color:var(--bar-ink)}
 nav{display:flex;gap:2px;flex:1;overflow-x:auto}
-nav button{border:none;background:none;font:inherit;font-size:15px;color:var(--ink-2);padding:6px 12px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap}
-nav button:hover{color:var(--ink)}
-nav button.on{color:var(--ink);font-weight:500}
+nav button{border:none;background:none;font:inherit;font-size:15px;color:var(--bar-ink-2);padding:7px 13px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap}
+nav button:hover{color:var(--bar-ink);background:var(--bar-active)}
+nav button.on{color:var(--bar-ink);font-weight:600;background:var(--bar-active)}
 .badge{background:var(--warn);color:#fff;border-radius:var(--r-pill);font-size:11px;padding:1px 6px;margin-left:5px;font-weight:600}
 .topright{display:flex;align-items:center;gap:var(--s3)}
-.icon-btn{width:36px;height:36px;border:none;background:none;color:var(--ink-2);border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center}
-.icon-btn:hover{background:var(--surface-sunken);color:var(--ink)}
+.icon-btn{width:34px;height:34px;border:none;background:none;color:var(--bar-ink-2);border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center}
+.icon-btn:hover{background:var(--bar-active);color:var(--bar-ink)}
+.topright .btn.ghost{color:var(--bar-ink-2)}.topright .btn.ghost:hover{color:var(--bar-ink);background:var(--bar-active)}
+.topright .seg{background:rgba(255,255,255,.08)}
+.topright .seg button{color:var(--bar-ink-2)}
+.topright .seg button.on{background:var(--bar-ink);color:var(--bar-bg)}
 
 /* buttons */
 .btn{height:36px;padding:0 16px;background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-sm);color:var(--ink);font:inherit;font-size:15px;font-weight:500;cursor:pointer}
@@ -34,8 +37,8 @@ select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent);
 
 /* cards & type */
 .card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);padding:var(--s5);margin-bottom:var(--s4)}
-h2{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin:0 0 var(--s4)}
-h3{font-size:21px;font-weight:600;letter-spacing:-.01em}
+h2{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--heading-2);margin:0 0 var(--s4)}
+h3{font-size:21px;font-weight:600;letter-spacing:-.01em;color:var(--heading)}
 .muted{color:var(--ink-2);font-size:15px}
 .caption{font-size:13px;color:var(--ink-3)}
 .mono{font-family:var(--font-mono)}
@@ -53,8 +56,9 @@ code{background:var(--surface-sunken);padding:1px 6px;border-radius:6px;font-siz
 /* KPI grid */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--s4);margin-bottom:var(--s4)}
 .kpi{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);padding:var(--s4) var(--s5)}
-.kpi .l{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
-.kpi .v{font-size:28px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums}
+.kpi{border-top:3px solid var(--accent)}
+.kpi .l{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--heading-2);font-weight:700}
+.kpi .v{font-size:28px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--heading)}
 .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
 
 /* bar rows (allocation / goals) */

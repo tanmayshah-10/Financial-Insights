@@ -128,6 +128,11 @@ export async function renameCategory(oldName, newName){
   await supabase.from('category_aliases').update({to_name:newName}).eq('household_id',HH).eq('to_name',oldName);
 }
 
+// ---- balance-sheet edits (Phase 2) ----
+export async function updateHolding(id, patch){ const {error}=await supabase.from('holdings').update(patch).eq('id',id); if(error) throw error; }
+export async function updatePolicy(id, patch){ const {error}=await supabase.from('policies').update(patch).eq('id',id); if(error) throw error; }
+export async function createSnapshot(row){ const {error}=await supabase.from('snapshots').insert({...row, household_id:HH}); if(error) throw error; }
+
 // ---- imported files + duplicate protection ----
 export async function recordImported(account, filename, contentHash){
   await supabase.from('imported_files').upsert({household_id:HH,account,filename,content_hash:contentHash||null},{onConflict:'household_id,account,filename'});

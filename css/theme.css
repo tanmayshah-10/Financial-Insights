@@ -9,6 +9,9 @@
   --ok:#2c7a54; --warn:#9a6a12; --danger:#b3261e;
   --pos:#15653f; --neg:#9b1c1c;                                  /* money direction — deep */
   --hl-purple:#6f2dbd; --hl-pink:#c2185b; --hl-navy:#1b3a8f;
+  /* classy layer: deep heading ink + a distinct top ribbon */
+  --heading:#16345c; --heading-2:#1f4c7a;
+  --bar-bg:#0f2440; --bar-ink:#eef4fb; --bar-ink-2:#9db4d0; --bar-active:rgba(120,170,225,.18);
   --font:"Geist",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
   --font-mono:"Geist Mono","SF Mono",ui-monospace,Menlo,monospace;
   --r-sm:8px; --r-md:12px; --r-lg:18px; --r-pill:999px;
@@ -22,6 +25,8 @@
   --accent-2:#3f79ad; --accent-3:#345f84; --accent-4:#28455f;
   --ok:#4fae86; --warn:#d6a24a; --danger:#e0655c;
   --pos:#46a67d; --neg:#d1655c;
+  --heading:#bcd3ef; --heading-2:#8cbdec;
+  --bar-bg:#0a1526; --bar-ink:#eef4fb; --bar-ink-2:#8fa6c2; --bar-active:rgba(120,170,225,.16);
   --shadow-sm:none; --shadow-md:0 4px 16px rgba(0,0,0,.4); --shadow-lg:0 16px 48px rgba(0,0,0,.6);
 }
 *{box-sizing:border-box}
