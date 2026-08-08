@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+# Editor cruft
+.vscode/
+*.swp
+*.log
+# Claude local config (keep out of the repo)
+.claude/
+# Never commit real statements
+transactions/
+*.csv
