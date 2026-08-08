@@ -319,11 +319,11 @@ function logLine(h){const l=$('#log');if(!l)return;l.style.display='block';l.ins
 // apply learned rules + aliases, prep rows for insert
 function prep(rows){return rows.map(r=>{let cat=M.rules[r.merchant]||r.category;cat=aliased(cat);return {...r,category:cat};});}
 async function importText(text,name,type){const key=type+'/'+name;
-  if(M.files.has(key)){logLine(`<span class="muted">• ${key}: already imported (filename)</span>`);return 0;}
+  // dedup by CONTENT only (a re-downloaded/renamed file with new rows must still import)
   const hash=await db.sha256(text);
-  if(M.fileHashes.has(hash)){logLine(`<span class="muted">• ${key}: identical file already imported (content hash) — skipped</span>`);return 0;}
+  if(M.fileHashes.has(hash)){logLine(`<span class="muted">• ${key}: identical file already imported (same content) — skipped</span>`);return 0;}
   let r;try{r=parseFile(text);}catch(e){logLine(`<span class="err">✗ ${key}: ${e.message}</span>`);return 0;}
-  if(!r.rows.length){logLine(`<span class="err">✗ ${key}: no usable rows</span>`);return 0;}
+  if(!r.rows.length){logLine(`<span class="err">✗ ${key}: no usable rows found (unrecognized format?)</span>`);return 0;}
   // duplicate protection: fingerprint against existing txns + overlapping-period check
   const seen=new Set(M.tx.map(t=>db.fingerprint(t)));
   const acctDates=M.tx.filter(t=>t.account===type).map(t=>t.txn_date);
@@ -339,10 +339,10 @@ async function importText(text,name,type){const key=type+'/'+name;
 let _importErrors=[];
 async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
   let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);await finishImport(a);}
-async function finishImport(a){ logLine(`<b>Done.</b> ${a} new.`); await reload();
-  if(_importErrors.length){ render(); toast('Import failed — '+_importErrors[0]); return; }
-  if(a>0){ toast(`Imported ${a} new transaction(s)`); go('overview'); }        // jump to the dashboard so you see them
-  else { render(); toast('No new transactions — files already imported, or all flagged as duplicates (see Review).'); }
+async function finishImport(a){ logLine(`<b>Done — ${a} new.</b>`); await reload();
+  if(_importErrors.length){ toast('Import failed — '+_importErrors[0]); return; }    // keep the log visible
+  if(a>0){ toast(`Imported ${a} new transaction(s)`); go('overview'); }              // jump to dashboard
+  else { toast('No new transactions — see the import log above for the reason.'); }  // keep the log visible
 }
 
 // folder (File System Access API)
