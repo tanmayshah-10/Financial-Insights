@@ -5,10 +5,14 @@ exports.handler = async (event) => {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return json(500, { answer: 'Market Ask is not configured: set ANTHROPIC_API_KEY in Netlify env vars.' });
 
-  let question, positions = [], summary = {};
-  try { ({ question, positions = [], summary = {} } = JSON.parse(event.body || '{}')); }
+  let question, messages, positions = [], summary = {};
+  try { ({ question, messages, positions = [], summary = {} } = JSON.parse(event.body || '{}')); }
   catch { return json(400, { answer: 'Bad request.' }); }
-  if (!question) return json(400, { answer: 'No question.' });
+  // accept either a single question or a full conversation
+  const convo = Array.isArray(messages) && messages.length
+    ? messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }))
+    : (question ? [{ role: 'user', content: String(question) }] : null);
+  if (!convo) return json(400, { answer: 'No question.' });
 
   // fetch live quotes for the positions' Yahoo symbols
   const syms = [...new Set(positions.map((p) => p.ysym).filter(Boolean))];
@@ -17,15 +21,12 @@ exports.handler = async (event) => {
 
   const system =
     'You are a market-aware financial analyst for the Shah family (base currency SGD). ' +
-    'Reason over the PORTFOLIO SUMMARY plus the LIVE QUOTES provided. ' +
+    'Reason over the CONTEXT DATA (their whole dashboard) plus the LIVE QUOTES below. ' +
     'Give analysis and considerations with explicit trade-offs and uncertainty — never a direct "buy/sell X now" instruction. ' +
-    'Lead with the specific numbers, cite the prices you used and their date, and flag anything the data does not cover. ' +
-    'This is analysis and education, NOT licensed financial advice.';
-
-  const content =
-    `PORTFOLIO SUMMARY (SGD):\n${JSON.stringify(summary)}\n\n` +
-    `POSITIONS + LIVE QUOTES:\n${JSON.stringify(enriched)}\n\n` +
-    `QUESTION: ${question}`;
+    'Lead with the specific numbers, cite prices you used and their date, and flag anything the data does not cover. ' +
+    'This is analysis and education, NOT licensed financial advice.\n\n' +
+    `CONTEXT DATA (SGD):\n${JSON.stringify(summary)}\n\n` +
+    `POSITIONS + LIVE QUOTES:\n${JSON.stringify(enriched)}`;
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -33,9 +34,9 @@ exports.handler = async (event) => {
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: process.env.FI_MODEL || 'claude-opus-4-8',
-        max_tokens: 1000,
+        max_tokens: 1200,
         system,
-        messages: [{ role: 'user', content }],
+        messages: convo,
       }),
     });
     const d = await r.json();

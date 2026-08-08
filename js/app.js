@@ -110,7 +110,7 @@ async function reload(){
   catIcon={}; catFlags={}; M.cats.forEach(c=>{catIcon[c.name]=c.icon; catFlags[c.name]=c;});
 }
 
-const AREAS=[['home','Home'],['cashflow','Cash Flow'],['wealth','Wealth'],['protection','Protection'],['plan','Plan'],['settings','Settings']];
+const AREAS=[['home','Home'],['cashflow','Cash Flow'],['wealth','Wealth'],['protection','Protection'],['plan','Plan'],['ask','Ask'],['settings','Settings']];
 const CF_TABS=['overview','insights','transactions','review','import'];
 const mountEl=()=>AREA==='cashflow'?'#cfbody':'#view';
 function renderShell(){
@@ -118,7 +118,7 @@ function renderShell(){
       <div class="brand">Shah Financial Insights</div>
       <nav id="nav"></nav>
       <div class="topright">
-        <button class="btn sm" style="background:rgba(255,255,255,.1);color:var(--bar-ink)" onclick="SI.openAsk()">✦ Ask</button>
+        <button class="btn sm" style="background:rgba(255,255,255,.1);color:var(--bar-ink)" onclick="SI.go('ask')">✦ Ask</button>
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
         <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>
         <button class="btn sm ghost" onclick="SI.signOut()">Sign out</button>
@@ -144,7 +144,7 @@ const AREA_ACCENT={home:'#2f6fb2',cashflow:'#b5701a',wealth:'#3a5bd0',protection
 function render(){
   buildNav();
   document.documentElement.style.setProperty('--area', AREA_ACCENT[AREA]||'#2f6fb2');
-  ({home:homeView, cashflow:cashflowView, wealth:wealthView, protection:protectionView, plan:planView, settings:settingsView}[AREA]||homeView)();
+  ({home:homeView, cashflow:cashflowView, wealth:wealthView, protection:protectionView, plan:planView, ask:askView, settings:settingsView}[AREA]||homeView)();
 }
 function cashflowView(){
   const rc=M.tx.filter(t=>t.review).length;
@@ -335,11 +335,16 @@ async function importText(text,name,type){const key=type+'/'+name;
   if(acctDates.length){ const lo=payload.reduce((m,t)=>t.txn_date<m?t.txn_date:m,payload[0].txn_date), hi=payload.reduce((m,t)=>t.txn_date>m?t.txn_date:m,payload[0].txn_date);
     const overlap=acctDates.some(d=>d>=lo&&d<=hi); if(overlap) logLine(`<span style="color:var(--warn)">⚠ ${key}: date range overlaps an earlier ${type} import — probable duplicates flagged for Review.</span>`); }
   try{ await db.insertTransactions(payload); await db.recordImported(type,name,hash); M.files.add(key); M.fileHashes.add(hash); }
-  catch(e){ logLine(`<span class="err">✗ ${key}: DB error ${e.message}</span>`); return 0; }
+  catch(e){ logLine(`<span class="err">✗ ${key}: DB error — ${e.message}</span>`); _importErrors.push(`${key}: ${e.message}`); return 0; }
   logLine(`<span class="ok">✓ ${key}: ${payload.length} txns (${r.rows[0].src})${dups?` · <b style="color:var(--warn)">${dups} probable duplicates → Review</b>`:''}${r.confident?'':' <b style="color:var(--warn)">⚠ needs review</b>'}</span>`);return payload.length;}
-async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
+let _importErrors=[];
+async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
   let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);await finishImport(a);}
-async function finishImport(a){logLine(`<b>Done.</b> ${a} new.`);await reload();render();/* re-render import view to keep log */ if(TAB==='import'){/*keep log visible*/}}
+async function finishImport(a){ logLine(`<b>Done.</b> ${a} new.`); await reload();
+  if(_importErrors.length){ render(); toast('Import failed — '+_importErrors[0]); return; }
+  if(a>0){ toast(`Imported ${a} new transaction(s)`); go('overview'); }        // jump to the dashboard so you see them
+  else { render(); toast('No new transactions — files already imported, or all flagged as duplicates (see Review).'); }
+}
 
 // folder (File System Access API)
 let DIR=null,DIRNAME='';const FS_OK=('showDirectoryPicker'in window);
@@ -796,13 +801,11 @@ function computeSap(){ const s=SCEN.sap; const nw=NW.netWorth(M,'household');
     <div class="flagline"><span class="dot dot-warn"></span><span>With no salary, you'd draw on cash/investments — a <b>${runway}-month</b> runway before touching long-term assets.</span></div>`;
 }
 function planAsk(){ const pos=pf(M.positions);
-  $('#planbody').innerHTML=`<div class="card"><h2>Market — live prices &amp; analysis</h2>
-    <p class="muted" style="margin-bottom:12px">Add tickers in <b>Wealth → Market positions</b>. Then ask market-aware questions — <b>analysis only, not advice</b>.</p>
-    <div id="mktPrices">${pos.length?'<span class="muted">Loading live prices…</span>':'<span class="muted">No market positions yet — add tickers in Wealth → Market positions (e.g. NVDA / SUNPHARMA on NSE / ETH on CRYPTO).</span>'}</div>
-    <div style="display:flex;gap:8px;margin-top:16px"><input id="askq" placeholder="Ask anything — market or your finances…" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
-    ${promptChips('m')}
-    <div id="askOut" style="margin-top:12px"></div>
-    <p class="caption muted" style="margin-top:10px">Live prices from Yahoo Finance; analysis by Claude. Your positions + prices are sent to the analysis function at query time. Not licensed financial advice.</p></div>`;
+  $('#planbody').innerHTML=`<div class="card"><h2>Market — live prices</h2>
+    <p class="muted" style="margin-bottom:12px">Live prices for your tickers (add them in <b>Wealth → Market positions</b>). For market-aware questions, use <b>Ask</b>.</p>
+    <div id="mktPrices">${pos.length?'<span class="muted"><span class="spinner"></span>Loading live prices…</span>':'<span class="muted">No market positions yet — add tickers in Wealth → Market positions (e.g. NVDA · SUNPHARMA on NSE · ETH on CRYPTO).</span>'}</div>
+    <div style="margin-top:16px"><button class="btn pri" onclick="SI.go('ask')">✦ Open Ask — market-aware analysis</button></div>
+    <p class="caption muted" style="margin-top:10px">Prices from Yahoo Finance (deployed site only). Not licensed financial advice.</p></div>`;
   if(pos.length) loadPrices(pos);
 }
 async function loadPrices(pos){ const syms=[...new Set(pos.map(p=>ysym(p.symbol,p.exchange)))];
@@ -833,15 +836,45 @@ async function askRun(qval, outEl){ const q=(qval||'').trim(); if(!q||!outEl)ret
   }catch(e){ outEl.innerHTML='<span class="muted">Ask isn’t active yet — deploy to Netlify and set <b>ANTHROPIC_API_KEY</b> in env vars (see README).</span>'; }
 }
 function ask(){ askRun($('#askq')?.value, $('#askOut')); }
-function askGlobal(){ askRun($('#gaskq')?.value, $('#gaskOut')); }
-function askPrompt(i, target){ const t=SUGGESTED[i]; const inp=target==='g'?$('#gaskq'):$('#askq'); if(inp)inp.value=t; target==='g'?askGlobal():ask(); }
-// global Ask — reachable from any tab (same brain, full dashboard context)
-function openAsk(){ $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>Ask — anything about your finances</h3>
-    <p class="muted" style="margin:4px 0 12px">One assistant over your whole dashboard + live market prices. Analysis, not advice.</p>
-    <div style="display:flex;gap:8px"><input id="gaskq" placeholder="Ask a question…" style="flex:1" onkeydown="if(event.key==='Enter')SI.askGlobal()"><button class="btn pri" onclick="SI.askGlobal()">Ask</button></div>
-    ${promptChips('g')}
-    <div id="gaskOut" style="margin-top:12px"></div>`;
-  $('#ov').classList.add('show'); setTimeout(()=>$('#gaskq')?.focus(),50);
+function askPrompt(i){ const inp=$('#askq'); if(inp){ inp.value=SUGGESTED[i]; } sendChat(); }
+
+// ---------- full-screen Ask chat (history sidebar + conversation) ----------
+let CHATS=JSON.parse(localStorage.getItem('si_chats')||'[]');
+let CHAT={id:null, title:'', messages:[]};
+function saveChats(){ localStorage.setItem('si_chats', JSON.stringify(CHATS.slice(0,50))); }
+function uid(){ return 'c'+Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function newChat(){ CHAT={id:null,title:'',messages:[]}; askView(); }
+function selectChat(id){ const c=CHATS.find(x=>x.id===id); if(c){ CHAT=JSON.parse(JSON.stringify(c)); askView(); } }
+function deleteChat(id){ CHATS=CHATS.filter(c=>c.id!==id); saveChats(); if(CHAT.id===id) newChat(); else askView(); }
+function askView(){
+  const side=`<div class="chatside"><button class="btn pri" style="width:100%" onclick="SI.newChat()">+ New chat</button>
+    <div class="chatlist">${CHATS.length?CHATS.map(c=>`<div class="chatitem ${c.id===CHAT.id?'on':''}" onclick="SI.selectChat('${c.id}')"><span>${esc(c.title||'Untitled')}</span><button class="chatdel" onclick="event.stopPropagation();SI.deleteChat('${c.id}')">✕</button></div>`).join(''):'<p class="caption muted" style="padding:8px">No conversations yet.</p>'}</div></div>`;
+  let main;
+  if(!CHAT.messages.length){
+    main=`<div class="chatmain"><div class="chatempty"><h1>Ask anything about your finances</h1>
+      <p class="muted">One assistant over your whole dashboard + live market prices. Analysis, not advice.</p>
+      <div class="chips" style="justify-content:center;max-width:640px">${SUGGESTED.map((s,i)=>`<button class="chip-btn" onclick="SI.askPrompt(${i})">${esc(s)}</button>`).join('')}</div></div>
+      ${chatInput()}</div>`;
+  } else {
+    const msgs=CHAT.messages.map(m=>`<div class="bubble ${m.role}">${m.role==='assistant'?esc(m.content).replace(/\n/g,'<br>'):esc(m.content)}</div>`).join('');
+    main=`<div class="chatmain"><div class="msgs" id="msgs">${msgs}</div>${chatInput()}</div>`;
+  }
+  $('#view').innerHTML=`<div class="chatwrap">${side}${main}</div>`;
+  const m=$('#msgs'); if(m) m.scrollTop=m.scrollHeight;
+  setTimeout(()=>$('#askq')?.focus(),30);
+}
+const chatInput=()=>`<div class="chatbar"><input id="askq" placeholder="Ask a question…" onkeydown="if(event.key==='Enter')SI.send()"><button class="btn pri" onclick="SI.send()">Ask</button></div>`;
+async function sendChat(){ const q=($('#askq')?.value||'').trim(); if(!q)return;
+  CHAT.messages.push({role:'user',content:q});
+  if(!CHAT.id){ CHAT.id=uid(); CHAT.title=q.slice(0,48); CHATS.unshift(CHAT); }
+  CHAT.messages.push({role:'assistant',content:'…'}); askView();
+  const pos=pf(M.positions).map(p=>({symbol:p.symbol,exchange:p.exchange,ysym:ysym(p.symbol,p.exchange),quantity:p.quantity,currency:p.currency,label:p.label}));
+  let answer;
+  try{ const r=await fetch('/.netlify/functions/market-ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:CHAT.messages.filter(m=>m.content!=='…'), positions:pos, summary:dataSummary()})});
+    if(!r.ok) throw new Error('fn'); answer=(await r.json()).answer||'No answer.';
+  }catch(e){ answer='Ask isn’t active yet — deploy to Netlify and set ANTHROPIC_API_KEY (and optionally FI_MODEL=claude-sonnet-5). Live prices in Plan → Market work once deployed.'; }
+  CHAT.messages[CHAT.messages.length-1]={role:'assistant',content:answer};
+  const idx=CHATS.findIndex(c=>c.id===CHAT.id); if(idx>=0) CHATS[idx]=CHAT; saveChats(); askView();
 }
 function dataSummary(){ const nw=NW.netWorth(M,'household');
   return { netWorth:Math.round(nw.total), invested:Math.round(nw.holdings), cash:Math.round(nw.cash),
@@ -909,7 +942,8 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  saveHoldingValue, savePolicy, planTab, scenIn, ask, askGlobal, askPrompt, openAsk,
+  saveHoldingValue, savePolicy, planTab, scenIn, ask, askPrompt,
+  newChat, selectChat, deleteChat, send:sendChat,
   addEntity:t=>openEditor(t), editEntity:(t,id)=>openEditor(t,id), saveEditor, deleteEntity, toggleEstate, saveTax };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
