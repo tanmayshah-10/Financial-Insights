@@ -29,11 +29,11 @@ export async function loadAll(){
   let categories = cats.data || [];
   if (!categories.length) categories = await seedCategories();     // fallback if trigger didn't seed
   return {
-    transactions: tx.data || [],
-    categories,
+    tx: tx.data || [],
+    cats: categories,
     rules: Object.fromEntries((rules.data||[]).map(r=>[r.merchant_key, r.category_name])),
     aliases: Object.fromEntries((aliases.data||[]).map(a=>[a.from_name, a.to_name])),
-    importedFiles: new Set((files.data||[]).map(f=>f.account+'/'+f.filename)),
+    files: new Set((files.data||[]).map(f=>f.account+'/'+f.filename)),
   };
 }
 

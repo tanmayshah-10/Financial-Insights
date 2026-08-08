@@ -42,10 +42,11 @@ const inScope=t=>(acct==='all'||t.account===acct)&&(month==='all'||t.txn_date.sl
 // ============================ BOOT ============================
 async function boot(){
   if(!CONFIGURED){ app.innerHTML=`<div class="center"><div class="card" style="max-width:520px"><h2>Setup needed</h2><p class="muted">Open <code>js/supabase.js</code> and paste your finance project's URL and anon key, then reload. (See README.)</p></div></div>`; return; }
-  supabase.auth.onAuthStateChange((_e,session)=>{ if(session) start(); });
-  const u=await currentUser();
-  if(u) start(); else renderSignIn();
+  supabase.auth.onAuthStateChange((_e,session)=>{ if(session) start(); else renderSignIn(); });
+  try{ const u=await currentUser(); if(u) start(); else renderSignIn(); }
+  catch(e){ showError(e); }
 }
+function showError(e){ app.innerHTML=`<div class="center"><div class="card" style="max-width:560px"><h3>Something went wrong</h3><p class="muted">${esc(e&&e.message||e)}</p><button class="btn" onclick="location.reload()">Reload</button></div></div>`; console.error('start error',e); }
 function renderSignIn(){
   app.innerHTML=`<div class="center"><div class="card" style="max-width:420px;text-align:center">
     <h2 style="margin-top:0">Spend Insights</h2>
@@ -60,12 +61,25 @@ async function signIn(){
   try{ await sendMagicLink(email); $('#authmsg').textContent='Check your email for the sign-in link.'; }
   catch(e){ $('#authmsg').textContent='Error: '+e.message; }
 }
+let STARTED=false;
 async function start(){
-  const u=await currentUser(); HHID=await resolveHouseholdId();
-  if(!HHID){ app.innerHTML=`<div class="center"><div class="card">Setting up your household… reload in a moment.</div></div>`; return; }
-  db.init(HHID, u.id);
-  await reload();
-  renderShell(); render();
+  if(STARTED) return; STARTED=true;
+  try{
+    const u=await currentUser();
+    if(!u){ STARTED=false; renderSignIn(); return; }
+    HHID=await resolveHouseholdId();
+    if(!HHID) HHID=await createHousehold(u.id);        // self-heal if the DB trigger didn't provision
+    if(!HHID){ app.innerHTML=`<div class="center"><div class="card" style="max-width:560px"><h3>Couldn't set up your household</h3><p class="muted">Make sure <code>schema.sql</code> ran fully in Supabase, then reload.</p><button class="btn" onclick="location.reload()">Reload</button></div></div>`; STARTED=false; return; }
+    db.init(HHID, u.id);
+    await reload();
+    renderShell(); render();
+  }catch(e){ STARTED=false; showError(e); }
+}
+async function createHousehold(uid){
+  const { data:hh, error } = await supabase.from('households').insert({name:'My Household'}).select('id').single();
+  if(error){ console.warn('createHousehold', error.message); return null; }
+  await supabase.from('household_members').insert({household_id:hh.id, user_id:uid, role:'owner'});
+  return hh.id;   // categories get seeded by db.loadAll() when it finds none
 }
 async function reload(){
   M=await db.loadAll();
