@@ -343,11 +343,14 @@ async function importText(text,name,type){const key=type+'/'+name;
   if(M.fileHashes.has(hash)){logLine(`<span class="muted">• ${key}: identical file already imported (same content) — skipped</span>`);return 0;}
   let r;try{r=parseFile(text);}catch(e){logLine(`<span class="err">✗ ${key}: ${e.message}</span>`);return 0;}
   if(!r.rows.length){logLine(`<span class="err">✗ ${key}: no usable rows found (unrecognized format?)</span>`);return 0;}
-  // duplicate protection: fingerprint against existing txns + overlapping-period check
-  const seen=new Set(M.tx.map(t=>db.fingerprint(t)));
+  // duplicate protection: fingerprint against existing txns AND rows already inserted
+  // earlier in THIS batch (_batchSeen grows as each file is processed → catches overlapping
+  // cumulative exports dropped together). Falls back to a fresh set for standalone calls.
+  const seen=_batchSeen||new Set(M.tx.map(t=>db.fingerprint(t)));
   const acctDates=M.tx.filter(t=>t.account===type).map(t=>t.txn_date);
   const payload=prep(r.rows).map(row=>{const t={...row,account:type,file:name}; t.fingerprint=db.fingerprint(t);
-    if(seen.has(t.fingerprint)){ t.review=true; t.flag='duplicate'; } return t;});
+    if(seen.has(t.fingerprint)){ t.review=true; t.flag='duplicate'; } else { seen.add(t.fingerprint); }
+    return t;});
   const dups=payload.filter(t=>t.flag==='duplicate').length;
   // overlap warning
   if(acctDates.length){ const lo=payload.reduce((m,t)=>t.txn_date<m?t.txn_date:m,payload[0].txn_date), hi=payload.reduce((m,t)=>t.txn_date>m?t.txn_date:m,payload[0].txn_date);
@@ -358,9 +361,9 @@ async function importText(text,name,type){const key=type+'/'+name;
     const prev=_importBalances[type]; if(!prev || (r.balance.as_of||'')>=(prev.as_of||'')) _importBalances[type]=r.balance;
     logLine(`<span class="muted">  ↳ balance captured: ${r.balance.kind==='card'?'card outstanding':'cash'} as of ${r.balance.as_of||'?'}</span>`); }
   logLine(`<span class="ok">✓ ${key}: ${payload.length} txns (${r.rows[0].src})${dups?` · <b style="color:var(--warn)">${dups} probable duplicates → Review</b>`:''}${r.confident?'':' <b style="color:var(--warn)">⚠ needs review</b>'}</span>`);return payload.length;}
-let _importErrors=[], _importBalances={};
-async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];_importBalances={};$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
-  let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);await finishImport(a);}
+let _importErrors=[], _importBalances={}, _batchSeen=null;
+async function ingest(fileList){const files=[...fileList];if(!files.length)return;const type=$('#manualType').value;_importErrors=[];_importBalances={};_batchSeen=new Set(M.tx.map(t=>db.fingerprint(t)));$('#log').innerHTML='';logLine(`<span class="spinner"></span>Reading ${files.length} file(s) as ${type}…`);
+  let a=0;for(const f of files)a+=await importText(await f.text(),f.name,type);_batchSeen=null;await finishImport(a);}
 async function finishImport(a){ logLine(`<b>Done — ${a} new.</b>`);
   // persist any captured statement balances BEFORE reload so the dashboard picks them up
   if(Object.keys(_importBalances).length){ try{ await db.setBalances({...(M.balances||{}), ..._importBalances}); logLine(`<span class="ok">✓ current balances updated</span>`);}catch(e){ logLine(`<span class="err">balance save failed: ${e.message}</span>`); } }
@@ -378,10 +381,10 @@ async function idbGet(k){const d=await idb();return new Promise((res,rej)=>{cons
 async function ensurePerm(h){const o={mode:'read'};if((await h.queryPermission(o))==='granted')return true;return (await h.requestPermission(o))==='granted';}
 async function connectFolder(){if(!FS_OK){alert('Folder scan needs Chrome/Edge. Use manual drop otherwise.');return;}try{DIR=await window.showDirectoryPicker({mode:'read'});await idbSet('dir',DIR);DIRNAME=DIR.name;if($('#folderStatus'))$('#folderStatus').textContent='Connected: '+DIRNAME;scanDelta();}catch(e){}}
 async function scanDelta(){if(!DIR){logLine('<span class="err">Connect the folder first.</span>');return;}if(!(await ensurePerm(DIR))){logLine('<span class="err">Permission denied.</span>');return;}
-  _importErrors=[];_importBalances={};$('#log').innerHTML='';logLine('<span class="spinner"></span>Scanning subfolders…');let a=0,seen=false;
+  _importErrors=[];_importBalances={};_batchSeen=new Set(M.tx.map(t=>db.fingerprint(t)));$('#log').innerHTML='';logLine('<span class="spinner"></span>Scanning subfolders…');let a=0,seen=false;
   for await(const sub of DIR.values()){if(sub.kind!=='directory')continue;const type=sub.name.toLowerCase();
     for await(const e of sub.values()){if(e.kind!=='file'||!/\.(csv|txt|rtf)$/i.test(e.name))continue;seen=true;const f=await e.getFile();a+=await importText(await f.text(),e.name,type);}}
-  if(!seen)logLine('<span class="muted">No CSV files found in subfolders.</span>');await finishImport(a);}
+  _batchSeen=null;if(!seen)logLine('<span class="muted">No CSV files found in subfolders.</span>');await finishImport(a);}
 (async()=>{if(!FS_OK)return;try{const h=await idbGet('dir');if(h){DIR=h;DIRNAME=h.name;}}catch(e){}})();
 
 // ---- mutations (write-through then reload) ----
