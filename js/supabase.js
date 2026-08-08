@@ -5,8 +5,8 @@
 //    Supabase dashboard -> Project Settings -> API -> Project URL + anon/public key.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-export const SUPABASE_URL = 'PASTE_YOUR_FINANCE_PROJECT_URL';        // e.g. https://abcd1234.supabase.co
-export const SUPABASE_ANON_KEY = 'PASTE_YOUR_FINANCE_ANON_KEY';       // the long anon/public JWT
+export const SUPABASE_URL = 'https://bxpffrvwwqxskjwsjaxx.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_yMzhp6svXpWoxUCHyGaA_Q_hBlH7--t';  // publishable (client-safe) key
 
 export const CONFIGURED =
   SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 40;
