@@ -450,19 +450,39 @@ function planView(){
 function settingsView(){
   const p=M.profiles||{};
   let h=`<div class="pagehead"><h1>Settings</h1></div>`;
-  h+=`<div class="card"><h2>Import v3 data</h2><p class="muted" style="margin-bottom:12px">Load your <code>finance-framework-state.json</code> export — holdings, policies, goals, tax, estate, snapshots. Replaces existing balance-sheet data.</p><button class="btn pri" onclick="SI.importV3()">Choose JSON file…</button></div>`;
+  h+=`<div class="card"><h2>Import v3 data</h2>
+    <p class="muted" style="margin-bottom:12px">Load your <code>finance-framework-state.json</code> — holdings, policies, goals, tax, estate, snapshots. Replaces existing balance-sheet data.</p>
+    <input type="file" accept=".json,application/json" onchange="SI.importV3File(this)">
+    <p class="caption muted" style="margin:14px 0 6px">…or if the file picker doesn’t respond, paste the JSON contents here and import:</p>
+    <textarea id="v3paste" rows="4" placeholder="{ &quot;version&quot;: 3, ... }" style="width:100%;font-family:var(--font-mono);font-size:12px"></textarea>
+    <button class="btn pri" style="margin-top:8px" onclick="SI.importV3Paste()">Import pasted JSON</button>
+    <div id="v3status" class="caption" style="margin-top:10px"></div>
+  </div>`;
   h+=`<div class="card"><h2>Profiles</h2><table><tbody>${Object.entries(p).map(([k,v])=>`<tr><td>${esc(v.name||k)}</td><td class="caption muted">${esc(v.residency||'')}${v.employer?' · '+esc(v.employer):''}</td></tr>`).join('')||'<tr><td class="muted">Imported with your v3 data.</td></tr>'}</tbody></table></div>`;
   h+=`<div class="card"><h2>FX rates (SGD per unit)</h2><table><tbody>${Object.entries(M.fx).map(([k,v])=>`<tr><td>${k.replace('_SGD','')}</td><td class="num mono">${v}</td></tr>`).join('')}</tbody></table><p class="caption muted" style="margin-top:6px">Editable rates come in a later pass; imported from v3 for now.</p></div>`;
   h+=`<div class="card"><h2>Appearance</h2><button class="btn" onclick="SI.theme()">Toggle ${document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'} mode</button></div>`;
   h+=`<div class="card"><h2>Data</h2><button class="btn" onclick="SI.exportCsv()">Export transactions CSV</button> <button class="btn danger" onclick="SI.clearAll()">Clear all transactions</button></div>`;
   $('#view').innerHTML=h;
 }
-async function importV3Pick(){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
-  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; let j; try{ j=JSON.parse(await f.text()); }catch(e){ alert('Not valid JSON.'); return; }
-    if(!confirm('Import v3 data? This replaces existing balance-sheet data (holdings, policies, goals, etc.).')) return;
-    try{ const c=await importV3(j,{replace:true}); await reload(); AREA='home'; render(); toast(`Imported: ${c.holdings} holdings · ${c.policies} policies · ${c.goals} goals`); }
-    catch(e){ alert('Import failed: '+e.message); } };
-  inp.click();
+function v3status(msg,cls){ const el=$('#v3status'); if(el){ el.textContent=msg; el.className='caption '+(cls||''); } else toast(msg); }
+async function doImportV3(j){
+  if(!j || j.version==null){ v3status('That doesn’t look like a finance-framework v3 export.','val-neg'); return; }
+  v3status('Importing…');
+  try{
+    const c=await importV3(j,{replace:true});
+    await reload(); AREA='home'; render();
+    toast(`Imported ${c.holdings} holdings · ${c.policies} policies · ${c.goals} goals`);
+  }catch(e){ console.error('v3 import',e); v3status('Import failed: '+(e?.message||e),'val-neg'); }
+}
+async function importV3File(el){
+  const f=el.files&&el.files[0]; if(!f) return;
+  let j; try{ j=JSON.parse(await f.text()); }catch(e){ v3status('That file isn’t valid JSON.','val-neg'); return; }
+  await doImportV3(j);
+}
+async function importV3Paste(){
+  const t=($('#v3paste')?.value||'').trim(); if(!t){ v3status('Paste the JSON first.','val-neg'); return; }
+  let j; try{ j=JSON.parse(t); }catch(e){ v3status('The pasted text isn’t valid JSON.','val-neg'); return; }
+  await doImportV3(j);
 }
 
 // ---- theme ----
@@ -483,7 +503,7 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');},
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
-  setProfile, theme:toggleTheme, importV3:importV3Pick, exportCsv:exportCSV };
+  setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };
