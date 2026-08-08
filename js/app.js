@@ -557,9 +557,20 @@ function protectionView(){
       ${kpi('Premiums you pay / yr', sgd0(annualPrem))}
     </div>`;
   h+=insightCard('protection');
+  h+=renewalsCard(ps);
   h+=policyTable('You maintain (self-funded)', self, '#15653f');
   h+=policyTable('From company (SAP group — lapses on exit)', company, '#9a6a12');
   $('#view').innerHTML=h;
+}
+function renewalsCard(ps){
+  const now=new Date(), soon=d=>d && (new Date(d)-now)/86400000 <= 90;
+  const due=ps.filter(p=>p.renewal_date).map(p=>({p, d:p.renewal_date, days:Math.floor((new Date(p.renewal_date)-now)/86400000)})).filter(x=>x.days<=90).sort((a,b)=>a.days-b.days);
+  const mat=ps.filter(p=>p.maturity_date).map(p=>({p, d:p.maturity_date, days:Math.floor((new Date(p.maturity_date)-now)/86400000)})).filter(x=>x.days<=365).sort((a,b)=>a.days-b.days);
+  if(!due.length && !mat.length) return '';
+  let h=`<div class="card"><h2>Renewals &amp; maturities</h2>`;
+  due.forEach(x=>h+=`<div class="flagline"><span class="dot dot-${x.days<0?'danger':'warn'}"></span><span><b>${esc(x.p.insurer)} ${esc(x.p.product||'')}</b> premium ${sgd0(premYr(x.p))}/yr ${x.days<0?`<span class="val-neg">${Math.abs(x.days)}d overdue</span>`:`due in ${x.days}d`} (${dfull(x.d)}).</span></div>`);
+  mat.forEach(x=>h+=`<div class="flagline"><span class="dot dot-ok"></span><span><b>${esc(x.p.insurer)} ${esc(x.p.product||'')}</b> matures ${dfull(x.d)} (${x.days<0?'passed':'in '+Math.round(x.days/30)+' mo'}).</span></div>`);
+  return h+`</div>`;
 }
 function policyTable(title, list, dot){
   if(!list.length) return '';
@@ -569,16 +580,37 @@ function policyTable(title, list, dot){
   return h+`</tbody></table></div>`;
 }
 function premYr(p){ const mult=p.premium_freq==='monthly'?12:p.premium_freq==='quarterly'?4:p.premium_freq==='semi-annual'?2:1; return NW.toSGD((p.premium||0)*mult, p.premium_currency, M.fx); }
+function dstat(d,label){ if(!d)return ''; const days=Math.floor((new Date(d)-new Date())/86400000);
+  const cls=days<0?'val-neg':days<60?'val-neg':days<180?'val-neutral':'val-neutral';
+  return `${dfull(d)} <span class="caption ${days<0?'val-neg':''}">(${days<0?Math.abs(days)+'d overdue':'in '+days+'d'})</span>`; }
 function openPolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return; const c=p.covers||{};
   const row=(k,v)=>`<div class="drow"><span class="k">${k}</span><span class="v2">${v}</span></div>`;
   const cov=[['Death',c.death],['TPD',c.tpd],['Critical illness',c.ci],['Early CI',c.earlyCi],['Hospitalisation',c.hospital]].filter(([,v])=>v>0);
   $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button>
     <h3 style="margin-bottom:2px">${esc(p.insurer)}</h3><div class="muted" style="margin-bottom:10px">${esc(p.product||'')} · ${p.type}</div>
     ${cov.map(([k,v])=>row(k, sgd0(toSGD(v,p.currency)))).join('')}
-    ${row('Premium', sgd0(premYr(p))+' / yr')}
-    ${row('Owner', p.owner)}${p.expiry?row('Expiry', esc(p.expiry)):''}${p.policy_number?row('Policy no.', esc(p.policy_number)):''}
-    ${p.notes?`<p class="caption" style="margin-top:12px;color:var(--ink-2)">${esc(p.notes)}</p>`:''}`;
+    ${row('Premium', premYr(p)?sgd0(premYr(p))+' / yr':'—')}
+    ${row('Premium paid to', p.premium_paid_to?dstat(p.premium_paid_to):'—')}
+    ${row('Next premium due', p.renewal_date?dstat(p.renewal_date):(p.expiry?esc(p.expiry):'—'))}
+    ${row('Maturity', p.maturity_date?dstat(p.maturity_date):(p.expiry?esc(p.expiry):'—'))}
+    ${row('Owner', p.owner)}${p.policy_number?row('Policy no.', esc(p.policy_number)):''}
+    ${row('Updated on', p.as_of?dfull(p.as_of)+' · '+freshPill(p.as_of):'—')}
+    ${p.notes?`<p class="caption" style="margin:10px 0 0;color:var(--ink-2)">${esc(p.notes)}</p>`:''}
+    <div class="card" style="box-shadow:none;border:1px solid var(--hairline);margin-top:14px"><h2>Update policy</h2>
+      <div class="drow"><span class="k">Premium (${p.premium_currency||p.currency} / ${p.premium_freq||'annual'})</span><span><input id="ppPrem" type="number" value="${p.premium??''}" style="width:130px;text-align:right"></span></div>
+      <div class="drow"><span class="k">Premium paid to</span><span><input id="ppPaid" type="date" value="${p.premium_paid_to||''}" style="width:150px"></span></div>
+      <div class="drow"><span class="k">Next premium due</span><span><input id="ppRenew" type="date" value="${p.renewal_date||''}" style="width:150px"></span></div>
+      <div class="drow"><span class="k">Maturity date</span><span><input id="ppMat" type="date" value="${p.maturity_date||''}" style="width:150px"></span></div>
+      <div class="fbtns"><button class="fb" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="SI.savePolicy('${id}')">Save</button></div>
+      <div id="ppMsg" class="caption" style="margin-top:6px"></div></div>`;
   $('#ov').classList.add('show');
+}
+async function savePolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return;
+  const patch={ premium: $('#ppPrem').value===''?null:parseFloat($('#ppPrem').value),
+    premium_paid_to: $('#ppPaid').value||null, renewal_date: $('#ppRenew').value||null,
+    maturity_date: $('#ppMat').value||null, as_of: today() };
+  try{ await db.updatePolicy(id, patch); await reload(); render(); openPolicy(id); toast('Policy updated'); }
+  catch(e){ $('#ppMsg').textContent='Error: '+(e.message||e); $('#ppMsg').className='caption val-neg'; }
 }
 
 let PLAN_TAB='goals';
@@ -763,7 +795,7 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
   holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
-  saveHoldingValue, planTab, scenIn, ask };
+  saveHoldingValue, savePolicy, planTab, scenIn, ask };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };
