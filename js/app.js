@@ -118,7 +118,6 @@ function renderShell(){
       <div class="brand">Shah Financial Insights</div>
       <nav id="nav"></nav>
       <div class="topright">
-        <button class="btn sm" style="background:rgba(255,255,255,.1);color:var(--bar-ink)" onclick="SI.go('ask')">✦ Ask</button>
         <div class="seg profiles">${['tanmay','urvi','household'].map(p=>`<button class="${profile===p?'on':''}" onclick="SI.setProfile('${p}')">${p==='tanmay'?'Mine':p==='urvi'?'Urvi':'Household'}</button>`).join('')}</div>
         <button class="icon-btn" title="Theme" onclick="SI.theme()">${themeIcon()}</button>
         <button class="btn sm ghost" onclick="SI.signOut()">Sign out</button>

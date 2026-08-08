@@ -11,15 +11,16 @@
 
 /* nav — a distinct deep ribbon */
 .top{position:sticky;top:0;z-index:30;background:var(--bar-bg);box-shadow:0 1px 0 rgba(0,0,0,.15)}
-.topin{max-width:1080px;margin:0 auto;padding:0 var(--s5);display:flex;align-items:center;gap:var(--s5);height:56px}
-.brand{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;color:var(--bar-ink);display:flex;align-items:center;gap:9px}
+.topin{max-width:1160px;margin:0 auto;padding:0 var(--s4);display:flex;align-items:center;gap:var(--s3);height:56px}
+.brand{font-size:16px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;color:var(--bar-ink);display:flex;align-items:center;gap:9px}
 .brand-mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#4c92dd,#17a673);box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;flex:none}
 .nw-chip{display:flex;flex-direction:column;line-height:1.15;padding:0 var(--s4);border-left:1px solid rgba(255,255,255,.12);white-space:nowrap}
 .nw-chip span{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--bar-ink-2)}
 .nw-chip b{font-size:15px;color:var(--bar-ink);font-variant-numeric:tabular-nums}
 @media(max-width:720px){.nw-chip{display:none}}
-nav{display:flex;gap:2px;flex:1;overflow-x:auto}
-nav button{border:none;background:none;font:inherit;font-size:15px;color:var(--bar-ink-2);padding:7px 13px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap}
+nav{display:flex;gap:1px;flex:1;overflow-x:auto;scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav button{border:none;background:none;font:inherit;font-size:14px;color:var(--bar-ink-2);padding:6px 10px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap}
 nav button:hover{color:var(--bar-ink);background:var(--bar-active)}
 nav button.on{color:var(--bar-ink);font-weight:600;background:var(--bar-active)}
 .badge{background:var(--warn);color:#fff;border-radius:var(--r-pill);font-size:11px;padding:1px 6px;margin-left:5px;font-weight:600}
