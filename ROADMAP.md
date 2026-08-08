@@ -94,6 +94,7 @@ Reuse v3's clean schema as relational tables:
 - **P7 — Home command-center dashboard + auto monthly snapshot + flag engine**
 - **P8 — Scenarios & Planning** (FIRE, retirement, leave-SAP, custom what-ifs)
 - **P9 — Natural-language queries** (LLM via serverless function)
+- **P10 — Market Intelligence** (agentic, market-aware advisory) — see `docs/P10-market-intelligence.md`
 
 ## Decisions — ALL RESOLVED
 1. **Ownership:** ✅ profiles for balance-sheet entities; cash-flow owned at account level (defaults to tanmay).
