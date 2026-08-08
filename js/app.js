@@ -15,7 +15,12 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new Set(),
           holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
-          snapshots:[], tags:[], accounts:[], valuations:[], fx:{}, tax:null, estate:null };
+          snapshots:[], tags:[], accounts:[], valuations:[], positions:[], fx:{}, tax:null, estate:null };
+// Yahoo symbol from (symbol, exchange)
+function ysym(symbol,exchange){ symbol=(symbol||'').toUpperCase().trim(); const ex=(exchange||'').toUpperCase();
+  if(ex==='CRYPTO') return symbol.includes('-')?symbol:symbol+'-USD';
+  if(ex==='NSE') return symbol+'.NS'; if(ex==='BSE') return symbol+'.BO'; if(ex==='SGX') return symbol+'.SI';
+  return symbol; }
 let catIcon={}, catFlags={}, HHID=null;
 let AREA='home', profile='tanmay';
 let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='';
@@ -416,6 +421,11 @@ const EDITORS={
   goal:{table:'goals',coll:'goals',title:'Goal',nameKey:'name',fields:[
     {k:'name',l:'Name',t:'text'},{k:'target',l:'Target',t:'number'},{k:'current_override',l:'Current (leave blank to auto)',t:'number'},
     {k:'horizon',l:'Target date',t:'date'},{k:'owner',l:'Owner',t:'owner'}]},
+  position:{table:'positions',coll:'positions',title:'Market position',nameKey:'symbol',fields:[
+    {k:'symbol',l:'Ticker (e.g. NVDA, SUNPHARMA, ETH)',t:'text'},
+    {k:'exchange',l:'Exchange',t:'select',opts:['US','NSE','BSE','SGX','CRYPTO']},
+    {k:'quantity',l:'Quantity',t:'number'},{k:'cost_basis',l:'Cost basis (total)',t:'number'},
+    {k:'currency',l:'Currency',t:'ccy'},{k:'label',l:'Label (optional)',t:'text'},{k:'owner',l:'Owner',t:'owner'}]},
 };
 function openEditor(type,id){ const spec=EDITORS[type]; const row= id?M[spec.coll].find(x=>x.id===id):{};
   $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>${id?'Edit':'Add'} ${spec.title.toLowerCase()}</h3>
@@ -538,6 +548,8 @@ function wealthView(){
     return `<tr style="cursor:pointer" onclick="SI.editEntity('property','${p.id}')"><td>${esc(p.name||'Property')}<div class="caption muted">${esc(p.location||'')} · ${p.status}</div></td><td class="caption">${p.owner}</td><td class="num">${p.status==='watchlist'?'<span class="muted">watchlist</span>':sgd0(eq)+' <span class="caption muted">equity</span>'}</td></tr>`;});
   // liabilities
   h+=bsSection('Liabilities','liabilities','liability', l=>`<tr style="cursor:pointer" onclick="SI.editEntity('liability','${l.id}')"><td>${esc(l.name||l.liability_type||'Liability')}<div class="caption muted">${esc(l.lender||'')}${l.interest_rate?' · '+l.interest_rate+'%':''}</div></td><td class="caption">${l.owner}</td><td class="num val-neg">−${sgd0(toSGD(l.outstanding,l.currency))}</td></tr>`);
+  // market positions (tickers for live-market analysis → Plan → Market)
+  h+=bsSection('Market positions <span class="caption muted" style="text-transform:none;letter-spacing:0">(tickers for live analysis)</span>','positions','position', p=>`<tr style="cursor:pointer" onclick="SI.editEntity('position','${p.id}')"><td>${esc(p.symbol)}<div class="caption muted">${p.exchange||''}${p.label?' · '+esc(p.label):''}</div></td><td class="caption">${p.owner}</td><td class="num">${p.quantity!=null?(+p.quantity).toLocaleString()+' units':''}</td></tr>`);
   $('#view').innerHTML=h;
 }
 // holding detail sheet
@@ -692,7 +704,7 @@ function monthlySurplus(){ const P=counted().filter(pMatch);
 }
 function selfPremiums(){ return pf(M.policies).filter(p=>!isCompanyPolicy(p)).reduce((s,p)=>s+premYr(p),0); }
 function planView(){
-  const sub=[['goals','Goals'],['fire','FIRE'],['leavesap','Leave SAP'],['ask','Ask']];
+  const sub=[['goals','Goals'],['fire','FIRE'],['leavesap','Leave SAP'],['ask','Market']];
   $('#view').innerHTML=`<div class="pagehead"><h1>Plan · ${profLabel(profile)}</h1><p class="muted">Simulations only — your data never changes.</p></div>
     <div class="subnav">${sub.map(([t,l])=>`<button class="${PLAN_TAB===t?'on':''}" onclick="SI.planTab('${t}')">${l}</button>`).join('')}</div><div id="planbody"></div>`;
   planBody();
@@ -782,21 +794,35 @@ function computeSap(){ const s=SCEN.sap; const nw=NW.netWorth(M,'household');
     ${s.ins&&coHosp>0?`<div class="flagline" style="margin-top:12px"><span class="dot dot-danger"></span><span>You lose <b>${sgd0(coHosp)}</b> hospitalisation cover — <b>buy an Integrated Shield Plan before resigning</b>.</span></div>`:''}
     <div class="flagline"><span class="dot dot-warn"></span><span>With no salary, you'd draw on cash/investments — a <b>${runway}-month</b> runway before touching long-term assets.</span></div>`;
 }
-function planAsk(){
-  $('#planbody').innerHTML=`<div class="card"><h2>Ask your data</h2>
-    <p class="muted" style="margin-bottom:12px">Ask anything about your finances in plain English — “how much do I have in India?”, “what’s my savings-rate trend?”, “am I over-concentrated?”.</p>
-    <div style="display:flex;gap:8px"><input id="askq" placeholder="Ask a question…" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
-    <div id="askOut" class="muted" style="margin-top:14px">Natural-language answers need a small serverless function with a Claude API key (server-side). It’s scaffolded — add your key in Netlify (see README) and this turns on. Until then, the Insights on each tab cover the key questions.</div></div>`;
+function planAsk(){ const pos=pf(M.positions);
+  $('#planbody').innerHTML=`<div class="card"><h2>Market — live prices &amp; analysis</h2>
+    <p class="muted" style="margin-bottom:12px">Add tickers in <b>Wealth → Market positions</b>. Then ask market-aware questions — <b>analysis only, not advice</b>.</p>
+    <div id="mktPrices">${pos.length?'<span class="muted">Loading live prices…</span>':'<span class="muted">No market positions yet — add tickers in Wealth → Market positions (e.g. NVDA / SUNPHARMA on NSE / ETH on CRYPTO).</span>'}</div>
+    <div style="display:flex;gap:8px;margin-top:16px"><input id="askq" placeholder="e.g. Am I overexposed to US tech given current valuations?" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
+    <div id="askOut" style="margin-top:14px"></div>
+    <p class="caption muted" style="margin-top:10px">Live prices from Yahoo Finance; analysis by Claude. Your positions + prices are sent to the analysis function at query time. Not licensed financial advice.</p></div>`;
+  if(pos.length) loadPrices(pos);
 }
-async function ask(){ const q=($('#askq')?.value||'').trim(); if(!q)return; const out=$('#askOut'); out.textContent='Thinking…';
-  try{ const r=await fetch('/.netlify/functions/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q, summary:dataSummary()})});
-    if(!r.ok) throw new Error('function not deployed'); const d=await r.json(); out.innerHTML=esc(d.answer||'').replace(/\n/g,'<br>');
-  }catch(e){ out.textContent='Ask isn’t active yet — deploy the serverless function and set ANTHROPIC_API_KEY in Netlify (see README).'; }
+async function loadPrices(pos){ const syms=[...new Set(pos.map(p=>ysym(p.symbol,p.exchange)))];
+  try{ const r=await fetch('/.netlify/functions/quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbols:syms})});
+    if(!r.ok) throw 0; const {quotes}=await r.json(); const el=$('#mktPrices'); if(!el)return;
+    let h=`<table><thead><tr><th>Ticker</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Day</th><th class="num">Value</th></tr></thead><tbody>`;
+    pos.forEach(p=>{const q=quotes[ysym(p.symbol,p.exchange)]||{}; const val=(q.price&&p.quantity)?q.price*p.quantity:null;
+      h+=`<tr><td>${esc(p.symbol)} <span class="caption muted">${p.exchange||''}</span></td><td class="num">${p.quantity??''}</td><td class="num">${q.price!=null?(q.currency||'')+' '+(+q.price).toLocaleString(undefined,{maximumFractionDigits:2}):'—'}</td><td class="num ${q.changePct>=0?'val-pos':'val-neg'}">${q.changePct!=null?(q.changePct>=0?'+':'')+q.changePct.toFixed(1)+'%':''}</td><td class="num">${val!=null?(q.currency||'')+' '+Math.round(val).toLocaleString():''}</td></tr>`;});
+    el.innerHTML=h+`</tbody></table>`;
+  }catch(e){ const el=$('#mktPrices'); if(el) el.innerHTML=`<span class="caption">Live prices need the deployed site — the market function isn't running on localhost. Positions still save; deploy to Netlify to see prices.</span>`; }
+}
+async function ask(){ const q=($('#askq')?.value||'').trim(); if(!q)return; const out=$('#askOut'); out.innerHTML='<span class="muted">Analysing against live market data…</span>';
+  const pos=pf(M.positions).map(p=>({symbol:p.symbol,exchange:p.exchange,ysym:ysym(p.symbol,p.exchange),quantity:p.quantity,currency:p.currency,label:p.label}));
+  try{ const r=await fetch('/.netlify/functions/market-ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q, positions:pos, summary:dataSummary()})});
+    if(!r.ok) throw new Error('fn'); const d=await r.json(); out.innerHTML=esc(d.answer||'').replace(/\n/g,'<br>');
+  }catch(e){ out.innerHTML='<span class="muted">Ask isn’t active yet — deploy to Netlify and set <b>ANTHROPIC_API_KEY</b> in env vars (see README). Live prices above still work once deployed.</span>'; }
 }
 function dataSummary(){ const nw=NW.netWorth(M,'household');
   return { netWorth:Math.round(nw.total), invested:Math.round(nw.holdings), cash:Math.round(nw.cash),
     holdings:M.holdings.map(h=>({name:h.platform,valueSGD:Math.round(toSGD(h.value_local,h.currency)),ccy:h.currency,category:h.category,tags:h.tags,owner:h.owner})),
     cover:NW.coverTotals(M.policies,'household',M.fx), goals:M.goals.map(g=>({name:g.name,target:g.target,current:Math.round(NW.goalCurrentSGD(g,M.holdings,M.fx))})),
+    positions:M.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,quantity:p.quantity,currency:p.currency})),
     monthlySpend:Math.round(annualExpenses()/12) };
 }
 
