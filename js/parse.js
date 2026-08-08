@@ -9,7 +9,10 @@ const FCY_CODES = 'USD|EUR|GBP|AUD|JPY|KRW|HKD|THB|MYR|IDR|CNY|CAD|CHF|NZD|INR|V
 export const FCY = new RegExp('\\b(' + FCY_CODES + ')\\b');
 
 function tokenize(line){const o=[];let c='',q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(q&&line[i+1]==='"'){c+='"';i++;}else q=!q;}else if(ch===','&&!q){o.push(c);c='';}else c+=ch;}o.push(c);return o.map(s=>s.trim());}
-function pdate(s){s=String(s).trim().split(/[ T]/)[0];let m=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);if(m){let y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${MONTH[m[2].toLowerCase()]}-${m[1].padStart(2,'0')}`;}m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(m)return s;m=s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/);if(m){let y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;}return null;}
+function pdate(s){s=String(s).trim();
+  // "03 Jun 2026" / "3 Jun 26" (DBS's newer export format) — keep before the T/space split
+  let m=s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2,4})$/);if(m&&MONTH[m[2].slice(0,3).toLowerCase()]){let y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${MONTH[m[2].slice(0,3).toLowerCase()]}-${m[1].padStart(2,'0')}`;}
+  s=s.split(/[ T]/)[0];m=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);if(m){let y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${MONTH[m[2].toLowerCase()]}-${m[1].padStart(2,'0')}`;}m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(m)return s;m=s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/);if(m){let y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;}return null;}
 function num(s){if(s==null||s==='')return null;const n=parseFloat(String(s).replace(/[^0-9.\-]/g,''));return isNaN(n)?null:n;}
 function isAmtCell(s){return /^-?(?:S?\$)?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?$/.test(String(s).trim());}
 
@@ -41,8 +44,9 @@ function mk(o){const fc=o.fcy?extractFC(o.desc):null;
 
 function rtfToText(s){s=s.replace(/\{\\(?:fonttbl|colortbl|\*\\expandedcolortbl)[\s\S]*?\}/g,'');s=s.replace(/\\'[0-9a-fA-F]{2}/g,'');s=s.replace(/\\[a-zA-Z]+-?\d* ?/g,'');s=s.replace(/[{}]/g,'');s=s.replace(/\\\r?\n/g,'\n');return s.trim();}
 
-function isDBScc(t){return /Transaction Date,Transaction Posting Date,Transaction Description/.test(t);}
-function parseDBScc(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^Transaction Date,/.test(l));const out=[];let masked=0,skipped=0;
+const deq=l=>l.replace(/"/g,'');   // strip CSV quotes so header detection works on both old and new DBS exports
+function isDBScc(t){return /Transaction Date,Transaction Posting Date,Transaction Description/.test(deq(t));}
+function parseDBScc(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^Transaction Date,/.test(deq(l)));const out=[];let masked=0,skipped=0;
   for(let i=hi+1;i<L.length;i++){if(!L[i].trim())continue;if(PAN.test(L[i]))masked++;PAN.lastIndex=0;
     const c=tokenize(L[i]);const date=pdate(c[0]),post=pdate(c[1]),desc=c[2]||'',ttype=c[3]||'',ptype=c[4]||'',debit=num(c[6]),credit=num(c[7]);
     if(!date){skipped++;continue;}
@@ -51,7 +55,7 @@ function parseDBScc(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^
     out.push(mk({date,post,amount:amt,dir,refund,cat,desc,channel:channel(ptype),fcy:FCY.test(desc),mk:merchKey(desc),src:'dbs_cc'}));}
   return{rows:out,masked,skipped,confident:true};}
 
-function isDBSsavings(t){return /Transaction Date,Value Date,Statement Code/.test(t);}
+function isDBSsavings(t){return /Transaction Date,Value Date,Statement Code/.test(deq(t));}
 function savingsCat(desc,code,dir){
   if(dir==='in')return /INT/.test(code)?'Income (interest)':'Income';
   if(/BILL DBSC|I-BANK|TOP-UP|PAYLAH|REVOLUT|PAYNOW|\bTRF\b|SI TO :UTMOST|\bICT\b/i.test(desc))return 'Transfer';
@@ -59,7 +63,7 @@ function savingsCat(desc,code,dir){
   if(/IRAS|\bITX\b|FWLEVY|MANPOWER|INCOME TAX/i.test(desc))return 'Tax';
   if(/BUS\/MRT|\bMRT\b|\bBUS\b/i.test(desc))return 'Transport';
   const a=autoCat(desc);return a==='Uncategorized'?'Transfer':a;}
-function parseDBSsavings(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^Transaction Date,Value Date,Statement Code/.test(l));const out=[];let masked=0,skipped=0;
+function parseDBSsavings(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^Transaction Date,Value Date,Statement Code/.test(deq(l)));const out=[];let masked=0,skipped=0;
   for(let i=hi+1;i<L.length;i++){if(!L[i].trim())continue;if(PAN.test(L[i]))masked++;PAN.lastIndex=0;
     const c=tokenize(L[i]);const date=pdate(c[0]),code=c[2]||'',desc=c[3]||'',debit=num(c[10]),credit=num(c[11]);
     if(!date){skipped++;continue;}let amt,dir;if(debit){amt=debit;dir='out';}else if(credit){amt=credit;dir='in';}else{skipped++;continue;}
