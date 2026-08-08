@@ -17,17 +17,27 @@ let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new 
           holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
           snapshots:[], tags:[], fx:{}, tax:null, estate:null };
 let catIcon={}, catFlags={}, HHID=null;
-let AREA='home', profile='household';
+let AREA='home', profile='tanmay';
 let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='';
 // ---- balance-sheet / money helpers ----
 const toSGD=(a,c)=>NW.toSGD(a,c,M.fx);
-const sgd0=n=>'SGD '+Math.round(Math.abs(n)).toLocaleString('en-SG');
-const signed=n=>(n<0?'−':'+')+sgd0(n);
+// abbreviated currency: SGD 1.34M / 933K / 940
+function abbr(n){const s=n<0?'−':'';n=Math.abs(Math.round(n));
+  if(n>=1e6) return s+'SGD '+(n/1e6).toFixed(2).replace(/\.?0+$/,'')+'M';
+  if(n>=1e4) return s+'SGD '+Math.round(n/1e3).toLocaleString('en-SG')+'K';
+  if(n>=1e3) return s+'SGD '+(n/1e3).toFixed(1).replace(/\.0$/,'')+'K';
+  return s+'SGD '+n.toLocaleString('en-SG');}
+const sgd0=abbr;
+const signed=n=>(n<0?'−':'+')+abbr(Math.abs(n));
 const valCls=n=>n>0?'val-pos':n<0?'val-neg':'val-neutral';
+const profLabel=p=>p==='tanmay'?'Mine':p==='urvi'?"Urvi's":'Household';
+// cash-flow profile scoping (accounts carry the owner; default to tanmay)
+const acctOwner=k=>{const a=(M.accounts||[]).find(x=>x.key===k);return a?a.owner:'tanmay';};
+const pMatch=t=>profile==='household'||acctOwner(t.account)===profile||acctOwner(t.account)==='joint';
 
 // ---- format helpers ----
 const money = n => (n<0?'-':'')+'SGD '+Math.abs(Math.round(n*100)/100).toLocaleString('en-SG',{minimumFractionDigits:2,maximumFractionDigits:2});
-const money0 = n => 'SGD '+Math.round(Math.abs(n)).toLocaleString('en-SG');
+const money0 = abbr;
 const pct = (a,b)=> b?Math.round(a/b*100):0;
 const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const fmtMonth=m=>{const[y,mo]=m.split('-');return MN[+mo-1]+' '+y;};
@@ -46,7 +56,7 @@ const nonspendSet=()=>new Set(M.cats.filter(c=>c.is_nonspend).map(c=>c.name));
 const eligSet=()=>new Set(M.cats.filter(c=>c.is_eligible).map(c=>c.name));
 const isSpend=t=>t.direction==='out'&&!nonspendSet().has(t.category);
 const counted=()=>M.tx.filter(t=>!t.review);
-const inScope=t=>(acct==='all'||t.account===acct)&&(month==='all'||t.txn_date.slice(0,7)===month);
+const inScope=t=>(acct==='all'||t.account===acct)&&(month==='all'||t.txn_date.slice(0,7)===month)&&pMatch(t);
 
 // ============================ BOOT ============================
 async function boot(){
@@ -124,8 +134,10 @@ function go(x){
 function setProfile(p){ profile=p; render(); }
 
 // ============================ RENDER ============================
+const AREA_ACCENT={home:'#2f6fb2',cashflow:'#b5701a',wealth:'#3a5bd0',protection:'#1f8a5b',plan:'#6f43c0',settings:'#56565b'};
 function render(){
   buildNav();
+  document.documentElement.style.setProperty('--area', AREA_ACCENT[AREA]||'#2f6fb2');
   ({home:homeView, cashflow:cashflowView, wealth:wealthView, protection:protectionView, plan:planView, settings:settingsView}[AREA]||homeView)();
 }
 function cashflowView(){
@@ -372,6 +384,28 @@ const kpi=(l,v,s,cls='')=>`<div class="kpi"><div class="l">${l}</div><div class=
 const freshPill=asOf=>{const f=NW.dataFreshness(asOf);const c=f.status==='old'?'neg':f.status==='stale'?'warn':'ok';return `<span class="age age-${c}">${f.label}</span>`;};
 const RAMP=['var(--accent)','var(--accent-2)','var(--accent-3)','var(--accent-4)','var(--ink-3)','var(--hairline)'];
 
+// ---- per-tab insights: "what the data shows & what to consider" ----
+function insightCard(area){ const items=insightsFor(area); if(!items.length) return '';
+  return `<div class="card"><h2><span class="dotmark" style="background:var(--accent)"></span>Insights — what to consider</h2>`+
+    items.map(i=>`<div class="flagline"><span class="dot dot-${i.sev||'ok'}"></span><span>${i.text}</span></div>`).join('')+`</div>`; }
+function insightsFor(area){ const out=[], nw=NW.netWorth(M,profile);
+  if(area==='wealth'){
+    pf(M.holdings).forEach(hd=>{ const p=nw.holdings?toSGD(hd.value_local,hd.currency)/nw.holdings*100:0;
+      if(p>40) out.push({sev:'danger',text:`<b>${esc(hd.platform.split(' (')[0])}</b> is ${Math.round(p)}% of your wealth — trim single-name risk.`}); });
+    const alloc=NW.wealthByCategory(M.holdings,profile,M.fx); const eq=(alloc.equity||0)+(alloc.growth||0); const eqPct=nw.holdings?Math.round(eq/nw.holdings*100):0;
+    if(eqPct>=80) out.push({sev:'warn',text:`<b>${eqPct}% in equity/growth</b> — a strong growth tilt. Add defensive ballast as goals near.`});
+    const stale=pf(M.holdings).filter(h=>{const a=NW.dataFreshness(h.as_of);return a.days!=null&&a.days>180;});
+    if(stale.length) out.push({sev:'warn',text:`<b>${stale.length} holding(s)</b> are 180+ days stale — run <b>Quick-update values</b> for an accurate net worth.`});
+    out.push({sev:'ok',text:`Cash is <b>${sgd0(nw.cash)}</b> — keep ~6 months of expenses liquid; the rest can work harder.`});
+  } else if(area==='protection'){
+    const ps=pf(M.policies), co=ps.filter(isCompanyPolicy), coHosp=coverSum(co,'hospital');
+    if(coHosp>0) out.push({sev:'danger',text:`Hospitalisation cover of <b>${sgd0(coHosp)}</b> is employer-provided and <b>lapses when you leave SAP</b> — secure a standalone Integrated Shield Plan first.`});
+    const selfDeath=coverSum(ps.filter(p=>!isCompanyPolicy(p)),'death');
+    out.push({sev:selfDeath>=1000000?'ok':'warn',text:`You personally fund <b>${sgd0(selfDeath)}</b> of life cover — the part that survives leaving your employer.`});
+  }
+  return out;
+}
+
 function homeView(){
   if(!M.holdings.length && !M.tx.length){ $('#view').innerHTML=`<div class="card" style="text-align:center;padding:44px"><h3>Welcome to your financial command centre</h3><p class="muted" style="margin:6px 0 18px">Import your investments &amp; insurance (Settings → Import v3 data) and your statements (Cash Flow → Import) to light this up.</p><button class="btn pri" onclick="SI.go('settings')">Import my data</button></div>`; return; }
   const nw=NW.netWorth(M,profile);
@@ -379,16 +413,17 @@ function homeView(){
   const fl=NW.flags(M,profile);
   const cover=NW.coverTotals(M.policies,profile,M.fx);
   const goals=pf(M.goals).filter(g=>g.target);
-  const months=[...new Set(counted().map(t=>t.txn_date.slice(0,7)))].sort();
+  const ct=counted().filter(pMatch);
+  const months=[...new Set(ct.map(t=>t.txn_date.slice(0,7)))].sort();
   const lm=months[months.length-1];
-  const mt=lm?counted().filter(t=>t.txn_date.slice(0,7)===lm):[];
+  const mt=lm?ct.filter(t=>t.txn_date.slice(0,7)===lm):[];
   const NOFLOW=new Set(['Transfer','Refund']);   // internal movements excluded; Income counts as money-in
   const inn=mt.filter(t=>t.direction==='in'&&!NOFLOW.has(t.category)).reduce((s,t)=>s+t.amount,0);
   const out=mt.filter(t=>t.direction==='out'&&!nonspendSet().has(t.category)).reduce((s,t)=>s+t.amount,0);
   const save= inn? Math.round((inn-out)/inn*100):null;
   const topAlloc=alloc[0], topPct=nw.holdings?Math.round(topAlloc?.[1]/nw.holdings*100):0;
 
-  let h=`<div class="pagehead"><h1>${profile==='tanmay'?'Mine':profile==='urvi'?"Urvi's":'Household'}</h1><p class="muted">Your position at a glance — reviewed periodically, pivoted deliberately.</p></div>`;
+  let h=`<div class="pagehead"><h1>${profLabel(profile)}</h1><p class="muted">Your position at a glance — reviewed periodically, pivoted deliberately.</p></div>`;
   h+=`<div class="kpis">
     ${kpi('Net worth', sgd0(nw.total), `${sgd0(nw.holdings)} invested`)}
     ${kpi('Savings rate', save==null?'—':save+'%', lm?`${fmtMonth(lm)} · in ${sgd0(inn)} / out ${sgd0(out)}`:'import statements')}
@@ -420,9 +455,10 @@ function trendNW(snaps){ const s=snaps.slice().sort((a,b)=>(a.created_at||'').lo
 function wealthView(){
   const nw=NW.netWorth(M,profile);
   const hs=pf(M.holdings).sort((a,b)=>toSGD(b.value_local,b.currency)-toSGD(a.value_local,a.currency));
-  let h=`<div class="pagehead" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px"><h1>Wealth</h1>
+  let h=`<div class="pagehead" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px"><h1>Wealth · ${profLabel(profile)}</h1>
     <div style="display:flex;gap:8px"><button class="btn" onclick="SI.quickUpdate()">Quick-update values</button><button class="btn pri" onclick="SI.snapshot()">Take snapshot</button></div></div>
     <div class="kpis">${kpi('Net worth',sgd0(nw.total))}${kpi('Investments',sgd0(nw.holdings))}${kpi('Cash',sgd0(nw.cash))}${kpi('Property equity',sgd0(nw.realEstate))}</div>`;
+  h+=insightCard('wealth');
   h+=`<div class="card"><h2>Investments · ${hs.length}</h2><table><thead><tr><th>Holding</th><th>Owner</th><th class="num">Value (SGD)</th><th class="num">Since inception</th><th>As of</th></tr></thead><tbody>`;
   hs.forEach(hd=>{ const v=toSGD(hd.value_local,hd.currency); const si=NW.sinceInception(hd,M.fx);
     h+=`<tr style="cursor:pointer" onclick="SI.holding('${hd.id}')"><td>${esc(hd.platform)}<div class="caption muted">${hd.category||''}${hd.currency!=='SGD'?' · '+hd.currency+' '+Math.round(hd.value_local).toLocaleString():''}</div></td>
@@ -472,24 +508,31 @@ async function takeSnapshot(){ const nw=NW.netWorth(M,'household');
   await reload(); render(); toast('Snapshot saved · net worth '+sgd0(nw.total));
 }
 
+function isCompanyPolicy(p){ return /group|employer|SAP/i.test((p.insurer||'')+' '+(p.type||'')+' '+(p.notes||'')) || !((p.premium||0)>0); }
+function coverSum(list,key){ return list.reduce((s,p)=>s+toSGD(p.covers?.[key]||0, p.currency),0); }
 function protectionView(){
-  const cov=NW.coverTotals(M.policies,profile,M.fx);
   const ps=pf(M.policies);
-  const annualPrem=ps.reduce((s,p)=>s+premYr(p),0);
-  const empDeath=ps.filter(p=>/employer|SAP/i.test((p.insurer||'')+(p.notes||''))).reduce((s,p)=>s+toSGD(p.covers?.death||0,p.currency),0);
-  let h=`<div class="pagehead"><h1>Protection</h1></div>
-    <div class="kpis">${kpi('Death',sgd0(cov.death))}${kpi('Critical illness',sgd0(cov.ci))}${kpi('Hospitalisation',sgd0(cov.hospital))}${kpi('Premiums / yr',sgd0(annualPrem))}</div>`;
-  // gap analysis vs a simple rule of thumb
-  h+=`<div class="card"><h2>Coverage check</h2>`;
-  const gapTgt=2000000; // simple death-cover target; refine with income later
-  h+=`<div class="flagline"><span class="dot dot-${cov.death>=gapTgt?'ok':'warn'}"></span><span><b>Life cover ${sgd0(cov.death)}</b> vs a ~${sgd0(gapTgt)} guide — ${cov.death>=gapTgt?'adequate':'review'}.</span></div>`;
-  if(empDeath>0) h+=`<div class="flagline"><span class="dot dot-warn"></span><span><b>${sgd0(empDeath)}</b> of cover is employer (SAP) group — lapses on leaving. Standalone hospitalisation (Integrated Shield) is the main gap.</span></div>`;
-  h+=`</div>`;
-  h+=`<div class="card"><h2>Policies · ${ps.length}</h2><table><thead><tr><th>Policy</th><th>Owner</th><th>Type</th><th class="num">Cover</th><th class="num">Premium/yr</th></tr></thead><tbody>`;
-  ps.forEach(p=>{ const c=p.covers||{}; const main=Math.max(c.death||0,c.ci||0,c.hospital||0);
-    h+=`<tr style="cursor:pointer" onclick="SI.policy('${p.id}')"><td>${esc(p.insurer)} <span class="muted">${esc(p.product||'')}</span></td><td class="caption">${p.owner}</td><td class="caption">${p.type}</td><td class="num">${sgd0(toSGD(main,p.currency))}</td><td class="num">${sgd0(premYr(p))}</td></tr>`; });
-  h+=`</tbody></table></div>`;
+  const company=ps.filter(isCompanyPolicy), self=ps.filter(p=>!isCompanyPolicy(p));
+  const selfDeath=coverSum(self,'death'), coDeath=coverSum(company,'death');
+  const annualPrem=self.reduce((s,p)=>s+premYr(p),0);
+  let h=`<div class="pagehead"><h1>Protection · ${profLabel(profile)}</h1></div>
+    <div class="kpis">
+      ${kpi('Life cover you fund', sgd0(selfDeath), `${self.length} self-paid`)}
+      ${kpi('Company cover', sgd0(coDeath), `${company.length} employer — lapses on exit`)}
+      ${kpi('Critical illness', sgd0(coverSum(ps,'ci')))}
+      ${kpi('Premiums you pay / yr', sgd0(annualPrem))}
+    </div>`;
+  h+=insightCard('protection');
+  h+=policyTable('You maintain (self-funded)', self, '#15653f');
+  h+=policyTable('From company (SAP group — lapses on exit)', company, '#9a6a12');
   $('#view').innerHTML=h;
+}
+function policyTable(title, list, dot){
+  if(!list.length) return '';
+  let h=`<div class="card"><h2><span class="dotmark" style="background:${dot}"></span>${title} · ${list.length}</h2><table><thead><tr><th>Policy</th><th>Owner</th><th>Type</th><th class="num">Cover</th><th class="num">Premium/yr</th></tr></thead><tbody>`;
+  list.forEach(p=>{ const c=p.covers||{}; const main=Math.max(c.death||0,c.ci||0,c.hospital||0);
+    h+=`<tr style="cursor:pointer" onclick="SI.policy('${p.id}')"><td>${esc(p.insurer)} <span class="muted">${esc(p.product||'')}</span></td><td class="caption">${p.owner}</td><td class="caption">${p.type}</td><td class="num">${sgd0(toSGD(main,p.currency))}</td><td class="num">${premYr(p)?sgd0(premYr(p)):'—'}</td></tr>`; });
+  return h+`</tbody></table></div>`;
 }
 function premYr(p){ const mult=p.premium_freq==='monthly'?12:p.premium_freq==='quarterly'?4:p.premium_freq==='semi-annual'?2:1; return NW.toSGD((p.premium||0)*mult, p.premium_currency, M.fx); }
 function openPolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return; const c=p.covers||{};
@@ -504,15 +547,98 @@ function openPolicy(id){ const p=M.policies.find(x=>x.id===id); if(!p)return; co
   $('#ov').classList.add('show');
 }
 
+let PLAN_TAB='goals';
+const SCEN={ fire:{expenses:null,mult:25,ret:5,contrib:5000,invested:0}, sap:{stock:1,salary:1,ins:1} };
+function planTab(t){ PLAN_TAB=t; planBody(); }
+function scenIn(g,k,v){ SCEN[g][k]= v===''?0:parseFloat(v); if(PLAN_TAB==='fire')computeFire(); else if(PLAN_TAB==='leavesap')computeSap(); }
+function annualExpenses(){ // from real transactions (household), avg monthly spend × 12
+  const P=counted().filter(t=>t.direction==='out'&&!nonspendSet().has(t.category));
+  const ms=[...new Set(P.map(t=>t.txn_date.slice(0,7)))]; if(!ms.length) return 120000;
+  const total=P.reduce((s,t)=>s+t.amount,0); return Math.round(total/ms.length*12);
+}
 function planView(){
+  const sub=[['goals','Goals'],['fire','FIRE'],['leavesap','Leave SAP'],['ask','Ask']];
+  $('#view').innerHTML=`<div class="pagehead"><h1>Plan · ${profLabel(profile)}</h1><p class="muted">Simulations only — your data never changes.</p></div>
+    <div class="subnav">${sub.map(([t,l])=>`<button class="${PLAN_TAB===t?'on':''}" onclick="SI.planTab('${t}')">${l}</button>`).join('')}</div><div id="planbody"></div>`;
+  planBody();
+}
+function planBody(){ document.querySelectorAll('.subnav button').forEach(b=>{}); ({goals:planGoals,fire:planFire,leavesap:planSap,ask:planAsk}[PLAN_TAB]||planGoals)(); }
+
+function planGoals(){
   const goals=pf(M.goals).filter(g=>g.target);
-  let h=`<div class="pagehead"><h1>Plan</h1></div>`;
-  h+=`<div class="card"><h2>Goals</h2>${goals.length?goals.map(g=>goalBar(g)).join(''):'<p class="muted">No goals yet.</p>'}</div>`;
-  h+=`<div class="card"><h2>Scenarios</h2><p class="muted">FIRE / Coast-FIRE, retirement readiness, and the <b>“what if I leave SAP”</b> stress test (salary + SAP stock + group insurance) arrive in Phase 8. Natural-language “Ask” lands in Phase 9.</p></div>`;
+  let h=`<div class="card"><h2>Goals — funding progress</h2>${goals.length?goals.map(g=>goalBar(g)).join(''):'<p class="muted">No goals yet.</p>'}</div>`;
   if(M.tax){ h+=`<div class="card"><h2>Tax &amp; SRS</h2><p>SRS cap ${sgd0(M.tax.srs_cap||35700)}${M.tax.srs_contributed_ytd!=null?` · contributed ${sgd0(M.tax.srs_contributed_ytd)}`:''}. <span class="muted">${esc(M.tax.notes||'')}</span></p></div>`; }
   if(M.estate){ const e=M.estate; const item=(ok,l)=>`<div class="flagline"><span class="dot dot-${ok?'ok':'danger'}"></span><span>${l}</span></div>`;
     h+=`<div class="card"><h2>Estate</h2>${item(e.will_sg,'SG will')}${item(e.will_india,'India will')}${item(e.guardianship_documented,'Guardianship documented')}${item(e.beneficiaries_checked,'Beneficiaries checked')}<p class="caption muted" style="margin-top:6px">${esc(e.notes||'')}</p></div>`; }
-  $('#view').innerHTML=h;
+  $('#planbody').innerHTML=h;
+}
+const nInput=(g,k,v,step)=>`<input type="number" step="${step||1}" value="${v}" oninput="SI.scenIn('${g}','${k}',this.value)" style="width:130px;text-align:right">`;
+function planFire(){
+  if(SCEN.fire.expenses==null) SCEN.fire.expenses=annualExpenses();
+  SCEN.fire.invested=Math.round(NW.netWorth(M,'household').holdings);
+  const f=SCEN.fire;
+  $('#planbody').innerHTML=`<div class="card"><h2>FIRE — financial independence</h2>
+    <p class="muted" style="margin-bottom:14px">When your investments can cover your spending forever. Adjust the levers — nothing is saved.</p>
+    <div class="drow"><span class="k">Annual expenses</span><span>${nInput('fire','expenses',f.expenses,1000)}</span></div>
+    <div class="drow"><span class="k">Target multiple (25 = 4% rule)</span><span>${nInput('fire','mult',f.mult,1)}</span></div>
+    <div class="drow"><span class="k">Expected return % / yr</span><span>${nInput('fire','ret',f.ret,0.5)}</span></div>
+    <div class="drow"><span class="k">Monthly contribution</span><span>${nInput('fire','contrib',f.contrib,500)}</span></div>
+    <div class="drow"><span class="k">Currently invested</span><span class="v2">${sgd0(f.invested)}</span></div>
+    <div id="fireOut" style="margin-top:16px"></div></div>`;
+  computeFire();
+}
+function computeFire(){ const f=SCEN.fire; const fiNum=f.expenses*f.mult; const progress=fiNum?Math.min(100,f.invested/fiNum*100):0;
+  const r=(f.ret||0)/100; let bal=f.invested, years=null; for(let m=1;m<=1200;m++){ bal=bal*(1+r/12)+(f.contrib||0); if(bal>=fiNum){years=(m/12);break;} }
+  const coastYrs=r>0? Math.log(fiNum/Math.max(1,f.invested))/Math.log(1+r):null; // years for current pot alone to reach FI
+  const out=$('#fireOut'); if(!out)return;
+  out.innerHTML=`<div class="kpis" style="margin:0">
+    ${kpi('FI number', sgd0(fiNum), `${f.mult}× expenses`)}
+    ${kpi('Progress', Math.round(progress)+'%', sgd0(f.invested)+' of '+sgd0(fiNum))}
+    ${kpi('Years to FI', years==null?'30+':years.toFixed(1), `at ${f.ret}% + ${sgd0(f.contrib)}/mo`)}
+    ${kpi('Coast-FIRE', coastYrs==null?'—':coastYrs.toFixed(1)+' yrs', 'pot alone reaches FI')}</div>
+    <div class="flagline" style="margin-top:12px"><span class="dot dot-${progress>=100?'ok':progress>=50?'warn':'danger'}"></span><span>${progress>=100?'You are financially independent at this spend level.':`You're ${Math.round(progress)}% of the way. Raising contributions or trimming expenses moves the date most.`}</span></div>`;
+}
+function planSap(){
+  const s=SCEN.sap;
+  $('#planbody').innerHTML=`<div class="card"><h2>What if I leave SAP</h2>
+    <p class="muted" style="margin-bottom:14px">The triple hit: salary stops, SAP stock is no longer employer-linked, and SAP group insurance lapses. Toggle what to model.</p>
+    <div class="drow"><span class="k">Remove SAP EquatePlus from net worth</span><span><label class="tgl"><input type="checkbox" ${s.stock?'checked':''} onchange="SI.scenIn('sap','stock',this.checked?1:0)"> exclude</label></span></div>
+    <div class="drow"><span class="k">Drop SAP group insurance cover</span><span><label class="tgl"><input type="checkbox" ${s.ins?'checked':''} onchange="SI.scenIn('sap','ins',this.checked?1:0)"> lapse</label></span></div>
+    <div id="sapOut" style="margin-top:16px"></div></div>`;
+  computeSap();
+}
+function computeSap(){ const s=SCEN.sap; const nw=NW.netWorth(M,'household');
+  const sap=M.holdings.find(h=>/equateplus|SAP/i.test(h.platform)); const sapVal=sap?toSGD(sap.value_local,sap.currency):0;
+  const newNW = nw.total - (s.stock? sapVal:0);
+  const ps=M.policies; const coHosp=ps.filter(isCompanyPolicy).reduce((a,p)=>a+toSGD(p.covers?.hospital||0,p.currency),0);
+  const coDeath=ps.filter(isCompanyPolicy).reduce((a,p)=>a+toSGD(p.covers?.death||0,p.currency),0);
+  const selfDeath=ps.filter(p=>!isCompanyPolicy(p)).reduce((a,p)=>a+toSGD(p.covers?.death||0,p.currency),0);
+  const expenses=annualExpenses(); const runway= nw.cash? (nw.cash/(expenses/12)).toFixed(1):'0';
+  const out=$('#sapOut'); if(!out)return;
+  out.innerHTML=`<div class="kpis" style="margin:0">
+    ${kpi('Net worth after', sgd0(newNW), s.stock?`−${sgd0(sapVal)} SAP stock`:'stock kept')}
+    ${kpi('Life cover after', sgd0(selfDeath + (s.ins?0:coDeath)), s.ins?`−${sgd0(coDeath)} group`:'group kept')}
+    ${kpi('Cash runway', runway+' mo', 'cash ÷ monthly spend')}
+    ${kpi('Concentration removed', sap?Math.round(sapVal/nw.holdings*100)+'%':'—','of invested wealth')}</div>
+    ${s.ins&&coHosp>0?`<div class="flagline" style="margin-top:12px"><span class="dot dot-danger"></span><span>You lose <b>${sgd0(coHosp)}</b> hospitalisation cover — <b>buy an Integrated Shield Plan before resigning</b>.</span></div>`:''}
+    <div class="flagline"><span class="dot dot-warn"></span><span>With no salary, you'd draw on cash/investments — a <b>${runway}-month</b> runway before touching long-term assets.</span></div>`;
+}
+function planAsk(){
+  $('#planbody').innerHTML=`<div class="card"><h2>Ask your data</h2>
+    <p class="muted" style="margin-bottom:12px">Ask anything about your finances in plain English — “how much do I have in India?”, “what’s my savings-rate trend?”, “am I over-concentrated?”.</p>
+    <div style="display:flex;gap:8px"><input id="askq" placeholder="Ask a question…" style="flex:1" onkeydown="if(event.key==='Enter')SI.ask()"><button class="btn pri" onclick="SI.ask()">Ask</button></div>
+    <div id="askOut" class="muted" style="margin-top:14px">Natural-language answers need a small serverless function with a Claude API key (server-side). It’s scaffolded — add your key in Netlify (see README) and this turns on. Until then, the Insights on each tab cover the key questions.</div></div>`;
+}
+async function ask(){ const q=($('#askq')?.value||'').trim(); if(!q)return; const out=$('#askOut'); out.textContent='Thinking…';
+  try{ const r=await fetch('/.netlify/functions/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q, summary:dataSummary()})});
+    if(!r.ok) throw new Error('function not deployed'); const d=await r.json(); out.innerHTML=esc(d.answer||'').replace(/\n/g,'<br>');
+  }catch(e){ out.textContent='Ask isn’t active yet — deploy the serverless function and set ANTHROPIC_API_KEY in Netlify (see README).'; }
+}
+function dataSummary(){ const nw=NW.netWorth(M,'household');
+  return { netWorth:Math.round(nw.total), invested:Math.round(nw.holdings), cash:Math.round(nw.cash),
+    holdings:M.holdings.map(h=>({name:h.platform,valueSGD:Math.round(toSGD(h.value_local,h.currency)),ccy:h.currency,category:h.category,tags:h.tags,owner:h.owner})),
+    cover:NW.coverTotals(M.policies,'household',M.fx), goals:M.goals.map(g=>({name:g.name,target:g.target,current:Math.round(NW.goalCurrentSGD(g,M.holdings,M.fx))})),
+    monthlySpend:Math.round(annualExpenses()/12) };
 }
 
 function settingsView(){
@@ -572,7 +698,8 @@ window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
-  holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot };
+  holding:openHolding, policy:openPolicy, quickUpdate:openQuickUpdate, saveQuickUpdate, snapshot:takeSnapshot,
+  planTab, scenIn, ask };
 
 // temporary spouse-join helper (used from console until a Join UI is added)
 window.__join = async (code)=>{ await joinHousehold(code); location.reload(); };

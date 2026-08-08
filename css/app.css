@@ -2,8 +2,12 @@
 .center{min-height:80vh;display:flex;align-items:center;justify-content:center;padding:var(--s5)}
 .wrap{max-width:980px;margin:0 auto;padding:var(--s6) var(--s5) var(--s8)}
 .pagehead{margin:0 0 var(--s5)}
-.pagehead h1{font-size:40px;font-weight:600;letter-spacing:-.02em;line-height:1.1;color:var(--heading)}
-.pagehead .muted{margin-top:4px}
+.pagehead h1{font-size:38px;font-weight:600;letter-spacing:-.02em;line-height:1.1;color:var(--heading);display:inline-block}
+.pagehead h1::after{content:"";display:block;width:44px;height:4px;border-radius:4px;background:var(--area);margin-top:8px}
+.pagehead .muted{margin-top:8px}
+.dotmark{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:8px;vertical-align:1px}
+.tgl{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--ink-2);cursor:pointer}
+.tgl input{width:auto;height:auto}
 
 /* nav — a distinct deep ribbon */
 .top{position:sticky;top:0;z-index:30;background:var(--bar-bg);box-shadow:0 1px 0 rgba(0,0,0,.15)}
@@ -36,7 +40,7 @@ textarea{height:auto;padding:10px 12px}
 select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
 
 /* cards & type */
-.card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);padding:var(--s5);margin-bottom:var(--s4)}
+.card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);padding:var(--s5);margin-bottom:var(--s4);box-shadow:var(--shadow-sm)}
 h2{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--heading-2);margin:0 0 var(--s4)}
 h3{font-size:21px;font-weight:600;letter-spacing:-.01em;color:var(--heading)}
 .muted{color:var(--ink-2);font-size:15px}
@@ -56,9 +60,9 @@ code{background:var(--surface-sunken);padding:1px 6px;border-radius:6px;font-siz
 /* KPI grid */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--s4);margin-bottom:var(--s4)}
 .kpi{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-md);padding:var(--s4) var(--s5)}
-.kpi{border-top:3px solid var(--accent)}
+.kpi{border-top:3px solid var(--area);box-shadow:var(--shadow-sm)}
 .kpi .l{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--heading-2);font-weight:700}
-.kpi .v{font-size:28px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--heading)}
+.kpi .v{font-size:27px;font-weight:600;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;color:var(--heading)}
 .kpi .s{font-size:13px;color:var(--ink-3);margin-top:4px}
 
 /* bar rows (allocation / goals) */
@@ -82,7 +86,7 @@ tr:last-child td{border-bottom:none}
 .seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
 .subnav{display:flex;gap:2px;margin-bottom:var(--s5);border-bottom:1px solid var(--hairline)}
 .subnav button{border:none;background:none;font:inherit;font-size:15px;color:var(--ink-2);padding:8px 12px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
-.subnav button.on{color:var(--ink);font-weight:500;border-bottom-color:var(--accent)}
+.subnav button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--area)}
 
 /* cash-flow legacy components (restyled to Quiet) */
 .grid{display:grid;grid-template-columns:1fr;gap:var(--s4)}

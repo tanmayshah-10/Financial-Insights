@@ -22,14 +22,14 @@ const q = (t,cols='*')=>supabase.from(t).select(cols).eq('household_id',HH);
 export async function loadAll(){
   const [tx, cats, rules, files, aliases,
          holdings, policies, goals, realEstate, cashAccounts, liabilities,
-         settings, taxState, estateState, snapshots, tags] = await Promise.all([
+         settings, taxState, estateState, snapshots, tags, accounts] = await Promise.all([
     q('transactions').order('txn_date',{ascending:false}),
     q('categories').order('sort'), q('rules'),
     supabase.from('imported_files').select('account,filename,content_hash').eq('household_id',HH),
     q('category_aliases','from_name,to_name'),
     q('holdings'), q('policies'), q('goals'), q('real_estate'), q('cash_accounts'), q('liabilities'),
     q('household_settings').maybeSingle(), q('tax_state').maybeSingle(), q('estate_state').maybeSingle(),
-    q('snapshots').order('created_at'), q('tags'),
+    q('snapshots').order('created_at'), q('tags'), q('accounts'),
   ]);
   let categories = cats.data || [];
   if (!categories.length) categories = await seedCategories();
@@ -43,7 +43,7 @@ export async function loadAll(){
     fileHashes: new Set((files.data||[]).map(f=>f.content_hash).filter(Boolean)),
     holdings: holdings.data||[], policies: policies.data||[], goals: goals.data||[],
     realEstate: realEstate.data||[], cashAccounts: cashAccounts.data||[], liabilities: liabilities.data||[],
-    snapshots: snapshots.data||[], tags: tags.data||[],
+    snapshots: snapshots.data||[], tags: tags.data||[], accounts: accounts.data||[],
     fx: s.fx || {USD_SGD:1.275,EUR_SGD:1.47,INR_SGD:0.0156,GBP_SGD:1.72},
     profiles: s.profiles || {}, kids: s.kids || [], emergencyMonths: s.emergency_fund_months ?? 6,
     tax: taxState.data || null, estate: estateState.data || null,
