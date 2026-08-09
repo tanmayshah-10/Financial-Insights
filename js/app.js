@@ -328,13 +328,15 @@ function sankeySVG(flows){ const funds=Object.keys(flows).filter(f=>Object.keys(
 function commitmentsSection(){ const cs=pf(M.commitments);
   let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Commitments &amp; funding</h2>
     <div style="display:flex;gap:8px"><button class="btn sm" onclick="SI.suggestCommit()">Suggest from history</button><button class="btn sm pri" onclick="SI.addEntity('commitment')">+ Add</button></div></div>`;
-  if(!cs.length){ return h+`<div class="flag info" style="margin-top:10px"><span class="ic2">🗓️</span><span>No commitments yet. <b>Suggest from history</b> reads your recurring &amp; periodic payments from imported statements, or <b>+ Add</b> an upcoming one (e.g. a holiday). Then set how each is funded — salary, bonus, or by liquidating investments.</span></div></div>`; }
+  // Funding money-map — ALWAYS shown (defaults every category to salary, re-routes as you assign funding)
+  h+=`<h3 style="margin:14px 0 6px">Where each category is funded from</h3>${sankeySVG(fundingFlows().flows)}
+    <div class="liqleg" style="margin-top:6px">${Object.entries(FUND).map(([k,l])=>`<span><i style="background:${FUNDC[k]}"></i>${l}</span>`).join('')}</div>
+    <p class="caption muted" style="margin-top:6px">Every category funds from salary by default. Add a commitment and set its <b>funded from</b> to re-route a band to bonus or investments.</p>`;
+  if(!cs.length){ return h+`<div class="flag info" style="margin-top:12px"><span class="ic2">🗓️</span><span>No commitments yet — the calendar &amp; funding-gap fill in once you add them. <b>Suggest from history</b> reads your recurring &amp; periodic payments, or <b>+ Add</b> an upcoming one (e.g. a holiday).</span></div></div>`; }
   const rows=commitmentCalendar();
   const soon=rows.slice(0,2).flatMap(r=>r.items.filter(c=>c.cadence!=='monthly').map(c=>({c,r})));
   if(soon.length){ h+=`<div style="margin-top:12px">${soon.map(({c,r})=>`<div class="flag warn"><span class="ic2">⏰</span><span>Plan ahead — <b>${esc(c.label)}</b> ~${sgd0(toSGD(c.amount,c.currency))} due around <b>${MN[r.m-1]} ${r.y}</b>, funded from ${FUND[c.funding]||c.funding}.</span></div>`).join('')}</div>`; }
   h+=`<h3 style="margin:16px 0 8px">Next 12 months — plan 2 months ahead</h3>${calendarHTML(rows)}`;
-  h+=`<h3 style="margin:20px 0 6px">Where each category is funded from</h3>${sankeySVG(fundingFlows().flows)}
-    <div class="liqleg" style="margin-top:6px">${Object.entries(FUND).map(([k,l])=>`<span><i style="background:${FUNDC[k]}"></i>${l}</span>`).join('')}</div>`;
   h+=`<h3 style="margin:20px 0 6px">All commitments</h3><table><thead><tr><th>What</th><th>Category</th><th class="num">Amount</th><th>When</th><th>Funded from</th></tr></thead><tbody>`;
   cs.slice().sort((a,b)=>toSGD(b.amount,b.currency)-toSGD(a.amount,a.currency)).forEach(c=>h+=`<tr onclick="SI.editEntity('commitment','${c.id}')" style="cursor:pointer"><td>${esc(c.label)}${c.source==='auto'?' <span class="chip">auto</span>':''}</td><td>${esc(c.category||'—')}</td><td class="num">${sgd0(toSGD(c.amount,c.currency))}</td><td class="caption">${cadenceLabel(c)}</td><td class="caption">${FUND[c.funding]||c.funding}</td></tr>`);
   return h+`</tbody></table></div>`;
@@ -514,8 +516,10 @@ function txView(){
   const byAmount = txSort==='amount';
   rows.sort(byAmount ? (a,b)=>b.amount-a.amount : (a,b)=>b.txn_date.localeCompare(a.txn_date));
   const inTot=rows.filter(t=>t.direction==='in').reduce((s,t)=>s+t.amount,0), outTot=rows.filter(t=>t.direction==='out').reduce((s,t)=>s+t.amount,0);
+  const catOpts=()=>{const cs=catList();if(M.tx.some(t=>t.hidden)&&!cs.includes('Others'))cs.push('Others');return `<option value="">All categories</option>`+cs.map(c=>`<option ${drillCat===c?'selected':''}>${ic(c)} ${c}</option>`).join('');};
   let h=`<div class="card"><div class="filters"><select onchange="SI.setAcct(this.value)">${acctOpts()}</select><select onchange="SI.setMonth(this.value)">${monthOpts()}</select>
-    <input placeholder="Search" value="${esc(txSearch)}" oninput="SI.search(this.value)" style="flex:1;min-width:140px">
+    <select onchange="SI.catfilter(this.value)">${catOpts()}</select>
+    <input placeholder="Search" value="${esc(txSearch)}" oninput="SI.search(this.value)" style="flex:1;min-width:130px">
     <div class="seg dirseg"><button class="${txDir==='all'?'on':''}" onclick="SI.txdir('all')">All</button><button class="cr ${txDir==='in'?'on':''}" onclick="SI.txdir('in')">Credit</button><button class="db ${txDir==='out'?'on':''}" onclick="SI.txdir('out')">Debit</button></div>
     <div class="seg"><button class="${txSort==='date'?'on':''}" onclick="SI.txsort('date')">Newest</button><button class="${txSort==='amount'?'on':''}" onclick="SI.txsort('amount')">Largest</button></div>
     <div class="seg">${['all','pin','wrong','duplicate','refund'].map(f=>`<button class="${txFlag===f?'on':''}" onclick="SI.flag('${f}')">${({all:'⚑',pin:'📌',wrong:'⚠️',duplicate:'⧉',refund:'⏳'})[f]}</button>`).join('')}</div></div>
@@ -591,7 +595,13 @@ function importView(){
 function logLine(h){const l=$('#log');if(!l)return;l.style.display='block';l.insertAdjacentHTML('beforeend',h+'<br>');l.scrollTop=l.scrollHeight;}
 
 // apply learned rules + aliases, prep rows for insert
-function prep(rows){return rows.map(r=>{let cat=M.rules[r.merchant]||r.category;cat=aliased(cat);return {...r,category:cat};});}
+// Apply learned merchant rules + aliases on every import — so subsequent uploads
+// inherit the same categorisation. Exception: keep the SAP amount-based split
+// (salary vs reimbursement) authoritative, since one merchant maps to two categories.
+function prep(rows){return rows.map(r=>{
+  const sapSplit = /SAP\s*ASIA|IBG\s*SAP/i.test((r.raw||'')+' '+(r.merchant||'')) && (r.category==='Income'||r.category==='Reimbursement');
+  let cat = sapSplit ? r.category : (M.rules[r.merchant]||r.category);
+  cat=aliased(cat); return {...r,category:cat};});}
 async function importText(text,name,type){const key=type+'/'+name;
   // dedup by CONTENT only (a re-downloaded/renamed file with new rows must still import)
   const hash=await db.sha256(text);
@@ -1278,7 +1288,7 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 
 // expose handlers for inline onclick
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
-  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, txdir:v=>{txDir=v;txView();}, txsort:v=>{txSort=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome, setClaims,
+  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, txdir:v=>{txDir=v;txView();}, txsort:v=>{txSort=v;txView();}, catfilter:v=>{drillCat=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome, setClaims,
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, hide:toggleHidden, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
