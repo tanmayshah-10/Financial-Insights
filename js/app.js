@@ -352,9 +352,62 @@ async function suggestCommit(){ const base=counted().filter(t=>pMatch(t)&&t.dire
     let ok=0; for(const c of add){ try{ await db.insertOne('commitments',{...c,currency:'SGD',owner:profile==='household'?'joint':profile}); ok++; }catch(e){} }
     await reload(); render(); toast(ok?`Added ${ok} commitment(s) — review funding & dates.`:'Add failed — did you run schema-commitments.sql?'); });
 }
+// ---- funding gap: does reliable income cover the calendar, or do you dip into investments? ----
+function incomeModel(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='in'&&!NOFLOW.has(catOf(t)));
+  const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
+  const inflow=base.filter(t=>mset.has(t.txn_date.slice(0,7)));
+  const byM={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byM[k]=byM[k]||{amt:0,mo:new Set()});byM[k].amt+=toSGD(t.amount,t.currency);byM[k].mo.add(t.txn_date.slice(0,7));});
+  const src=Object.entries(byM).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size})).sort((a,b)=>b.amt-a.amt);
+  const salarySrc=src.find(s=>s.mos>=Math.max(2,N-1)&&s.amt/N>500);
+  const totIn=inflow.reduce((s,t)=>s+toSGD(t.amount,t.currency),0);
+  return {reliableMo: totIn/N, salaryMo:(salarySrc?salarySrc.amt:0)/N, N}; }
+function spendBaselineMo(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
+  const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
+  const byCat={}; base.filter(t=>mset.has(t.txn_date.slice(0,7))).forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{amt:0,mo:new Set()});byCat[c].amt+=toSGD(t.amount,t.currency);byCat[c].mo.add(t.txn_date.slice(0,7));});
+  let b=0; Object.values(byCat).forEach(v=>{ if(v.mo.size>=Math.max(2,Math.ceil(N*0.6))) b+=v.amt/N; }); return b; }
+function svgCashLine(proj){ const W=680,H=210,padT=16,padB=30,padL=4;
+  const vals=proj.map(p=>p.cash); const mx=Math.max(0,...vals),mn=Math.min(0,...vals),range=(mx-mn)||1;
+  const x=i=>padL+i*(W-padL*2)/(Math.max(1,proj.length-1)), y=v=>padT+(mx-v)/range*(H-padT-padB), zY=y(0);
+  let s=`<line x1="0" y1="${zY.toFixed(1)}" x2="${W}" y2="${zY.toFixed(1)}" stroke="var(--ink-3)" stroke-dasharray="3 3"/>`;
+  s+=`<polyline points="${proj.map((p,i)=>x(i).toFixed(1)+','+y(p.cash).toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+  proj.forEach((p,i)=>{ s+=`<circle cx="${x(i).toFixed(1)}" cy="${y(p.cash).toFixed(1)}" r="3.5" fill="${p.cash<0?'var(--neg)':'var(--pos)'}"/>`;
+    if(p.invLump>0) s+=`<circle cx="${x(i).toFixed(1)}" cy="${(zY+11).toFixed(1)}" r="3" fill="#7F77DD"/>`;
+    else if(p.bonusLump>0) s+=`<circle cx="${x(i).toFixed(1)}" cy="${(zY+11).toFixed(1)}" r="3" fill="#5DCAA5"/>`;
+    s+=`<text x="${x(i).toFixed(1)}" y="${H-8}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MN[p.m-1]}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Projected reliable cash across the next 12 months">${s}</svg>`; }
+function fundingGapHTML(){ const im=incomeModel(); if(!im.reliableMo && !pf(M.commitments).length) return '';
+  const ov=(()=>{try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};}})();
+  const reliableMo = ov.reliableMo!=null? +ov.reliableMo : im.reliableMo;
+  const baselineMo = spendBaselineMo();
+  const rows=commitmentCalendar();
+  const startCash = currentBalances().cash || 0;
+  let cash=startCash;
+  const proj=rows.map(r=>{ const lumps=r.items.filter(c=>c.cadence!=='monthly');
+    const sum=f=>lumps.filter(c=>f.includes(c.funding||'salary')).reduce((s,c)=>s+toSGD(c.amount,c.currency),0);
+    const selfFund=sum(['salary','other']), invLump=sum(['investments']), bonusLump=sum(['bonus']);
+    const net=reliableMo-baselineMo-selfFund; cash+=net; return {...r, selfFund, invLump, bonusLump, net, cash}; });
+  const neg=proj.filter(p=>p.cash<0);
+  const deepest=proj.reduce((m,p)=>p.cash<m.cash?p:m, proj[0]||{cash:0});
+  const plannedInv=proj.reduce((s,p)=>s+p.invLump,0), plannedBonus=proj.reduce((s,p)=>s+p.bonusLump,0);
+  const allLumps=rows.reduce((s,r)=>s+r.items.filter(c=>c.cadence!=='monthly').reduce((a,c)=>a+toSGD(c.amount,c.currency),0),0);
+  const annualReliable=reliableMo*12, annualOut=baselineMo*12+allLumps;
+  const selfObligations=baselineMo*12+proj.reduce((s,p)=>s+p.selfFund,0);
+  let h=`<div class="card"><h2>Funding gap — will income cover the year?</h2>
+    <p class="caption muted" style="margin:-2px 0 12px">Running cash if funded by <b>reliable income only</b> (salary + steady income), starting from your cash on hand. Where the line dips below zero, that month needs a bonus or an investment sale.</p>
+    <div class="kpis">${kpi('Reliable income',sgd0(annualReliable),'per year')}${kpi('Committed out',sgd0(annualOut),'baseline + lumps / yr')}${kpi('Reliable surplus',signed(annualReliable-selfObligations),(annualReliable-selfObligations)>=0?'covers its own':'short on its own',(annualReliable-selfObligations)>=0?'val-pos':'val-neg')}${kpi('Planned inv. draw',sgd0(plannedInv),'you earmarked')}</div>
+    ${svgCashLine(proj)}
+    <div class="liqleg" style="margin-top:6px"><span><i style="background:var(--pos)"></i>cash positive</span><span><i style="background:var(--neg)"></i>cash negative</span><span><i style="background:#5DCAA5"></i>bonus month</span><span><i style="background:#7F77DD"></i>planned inv. draw</span></div>`;
+  if(neg.length){ h+=`<div class="flag warn" style="margin-top:12px"><span class="ic2">⚠️</span><span>Reliable income runs short in <b>${neg.length} month(s)</b> — deepest at <b>${MN[deepest.m-1]} ${deepest.y}</b> (${sgd0(deepest.cash)}). That's the gap you're covering by selling investments right now. Earmark those months' lumps to <b>bonus</b> or <b>investments</b> so it's a plan, not a surprise.</span></div>`; }
+  else { h+=`<div class="flag good" style="margin-top:12px"><span class="ic2">✓</span><span>Reliable income stays positive all year (low point ${sgd0(deepest.cash)}). ${plannedInv?`Plus SGD ${kfmt(plannedInv)} of planned investment draws you chose.`:''}</span></div>`; }
+  h+=`<div class="drow" style="margin-top:12px"><span class="k">Reliable monthly income</span><span class="v2"><input id="incMo" type="number" value="${Math.round(reliableMo)}" style="width:120px;text-align:right" onchange="SI.setIncome(this.value)"> <span class="caption muted">${ov.reliableMo!=null?'override':'detected'}</span></span></div>
+    <p class="caption muted">Detected from your imported inflows. If salary lands in an account you haven't imported, set the real figure here.</p></div>`;
+  return h;
+}
+async function setIncome(v){ const n=parseFloat(v); const o=(()=>{try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};}})(); if(isNaN(n))delete o.reliableMo; else o.reliableMo=n; localStorage.setItem('si_income',JSON.stringify(o)); insightsView(); }
 function insightsView(){
   let h=cashflowAnalysisHTML();
   h+=commitmentsSection();
+  h+=fundingGapHTML();
   const P=counted().filter(inScope).filter(isSpend);
   if(!P.length){$(mountEl()).innerHTML=h||'<div class="card"><div class="muted">No data yet — import statements to see your analysis.</div></div>';return;}
   const gross=P.reduce((s,t)=>s+t.amount,0);
@@ -1175,7 +1228,7 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 
 // expose handlers for inline onclick
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
-  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit,
+  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome,
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, hide:toggleHidden, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
