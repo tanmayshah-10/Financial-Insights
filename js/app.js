@@ -247,8 +247,9 @@ function cashflowAnalysisHTML(){
   const byIn={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byIn[k]=byIn[k]||{amt:0,mo:new Set()});byIn[k].amt+=t.amount;byIn[k].mo.add(t.txn_date.slice(0,7));});
   const inSrc=Object.entries(byIn).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size})).sort((a,b)=>b.amt-a.amt);
   const interest=inflow.filter(t=>catOf(t)==='Income (interest)').reduce((s,t)=>s+t.amount,0);
-  const salarySrc=inSrc.find(s=>s.mos>=Math.max(2,N-1)&&s.amt/N>500), salaryTot=salarySrc?salarySrc.amt:0;
-  const otherIn=totIn-salaryTot-interest;
+  const salarySrc=inSrc.find(s=>s.mos>=Math.max(2,N-1)&&s.amt/N>500&&!CLAIMKEY.test(s.k)), salaryTot=salarySrc?salarySrc.amt:0;
+  const claims=inflow.filter(t=>{const k=merchOf(t)||catOf(t);return k!==(salarySrc?salarySrc.k:'')&&CLAIMKEY.test(k);}).reduce((s,t)=>s+t.amount,0);
+  const otherIn=totIn-salaryTot-interest-claims;
   // expenses: regular vs one-off
   const outflow=scoped.filter(isOut);
   const byCat={}; outflow.forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{amt:0,mo:{}});byCat[c].amt+=t.amount;byCat[c].mo[t.txn_date.slice(0,7)]=(byCat[c].mo[t.txn_date.slice(0,7)]||0)+t.amount;});
@@ -266,7 +267,8 @@ function cashflowAnalysisHTML(){
   // income
   h+=`<div class="card"><h2>What's coming in</h2>
     <div class="io"><div><div class="k">💼 Salary${salarySrc?' · '+esc(salarySrc.k):''}</div><div class="n">${sgd0(salaryTot/N)}</div></div>
-      <div><div class="k">🧾 Other income (claims etc.)</div><div class="n">${sgd0(otherIn/N)}</div></div>
+      <div><div class="k">🧾 SAP reimbursements / claims</div><div class="n">${sgd0(claims/N)}</div></div>
+      <div><div class="k">↩️ Other income</div><div class="n">${sgd0(otherIn/N)}</div></div>
       <div><div class="k">💰 Interest</div><div class="n">${sgd0(interest/N)}</div></div></div>`;
   if(inSrc.length){h+=`<table style="margin-top:10px"><thead><tr><th>Source</th><th class="num">Months</th><th class="num">Total</th><th class="num">~/mo</th></tr></thead><tbody>`;
     inSrc.slice(0,8).forEach(s=>h+=`<tr><td>${esc(s.k)}</td><td class="num">${s.mos}/${N}</td><td class="num">${sgd0(s.amt)}</td><td class="num muted">${sgd0(s.amt/N)}</td></tr>`);h+=`</tbody></table>`;}
@@ -353,7 +355,8 @@ async function suggestCommit(){ const base=counted().filter(t=>pMatch(t)&&t.dire
     await reload(); render(); toast(ok?`Added ${ok} commitment(s) — review funding & dates.`:'Add failed — did you run schema-commitments.sql?'); });
 }
 // ---- funding gap: does reliable income cover the calendar, or do you dip into investments? ----
-const SALKEY=/SALARY|PAYROLL|WAGES|\bSAP\b|MONTHLY\s*SAL/i;
+const SALKEY=/SALARY|PAYROLL|WAGES|MONTHLY\s*SAL/i;      // NOT 'SAP' — SAP credits are expense claims, not salary
+const CLAIMKEY=/\bSAP\b|CLAIM|REIMBURS|EXPENSE/i;         // company reimbursements / incidentals
 function incomeModel(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='in'&&!NOFLOW.has(catOf(t)));
   const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
   const inflow=base.filter(t=>mset.has(t.txn_date.slice(0,7)));
@@ -403,8 +406,12 @@ function fundingGapHTML(){ const g=gapModel(); if(!g.reliableMo && !pf(M.commitm
     <div class="liqleg" style="margin-top:6px"><span><i style="background:var(--pos)"></i>cash positive</span><span><i style="background:var(--neg)"></i>cash negative</span><span><i style="background:#5DCAA5"></i>bonus month</span><span><i style="background:#7F77DD"></i>planned inv. draw</span></div>`;
   if(neg.length){ h+=`<div class="flag warn" style="margin-top:12px"><span class="ic2">⚠️</span><span>Reliable income runs short in <b>${neg.length} month(s)</b> — deepest at <b>${MN[deepest.m-1]} ${deepest.y}</b> (${sgd0(deepest.cash)}). That's the gap you're covering by selling investments right now.</span></div>`; }
   else { h+=`<div class="flag good" style="margin-top:12px"><span class="ic2">✓</span><span>Reliable income stays positive all year (low point ${sgd0(deepest.cash)}). ${plannedInv?`Plus ${sgd0(plannedInv)} of planned investment draws.`:''}</span></div>`; }
+  const pending = g.ov.pendingClaims!=null? +g.ov.pendingClaims : 0;
+  if(pending>0 && neg.length){ const after=deepest.cash+pending;
+    h+=`<div class="flag good" style="margin-top:8px"><span class="ic2">📥</span><span>You're owed <b>${sgd0(pending)}</b> in unsubmitted claims. Submitting them is a one-time <b>+${sgd0(pending)}</b> — ${after>=0?`enough to cover your deepest dip (${sgd0(deepest.cash)}), leaving ${sgd0(after)}.`:`it narrows the deepest dip to ${sgd0(after)}.`} The delay in submitting is what's holding that cash back.</span></div>`; }
   h+=`<div class="drow" style="margin-top:12px"><span class="k">Reliable monthly income</span><span class="v2"><input id="incMo" type="number" value="${Math.round(reliableMo)}" style="width:120px;text-align:right" onchange="SI.setIncome(this.value)"> <span class="caption muted">${override?'override':(im.salaryName?'incl. salary “'+esc(im.salaryName)+'”':'detected')}</span></span></div>
-    <p class="caption muted">Salary is read from your DBS Multiplier (debit) credits. If it lands in an account you haven't imported, set the real figure here.</p></div>`;
+    <div class="drow"><span class="k">Pending reimbursements (owed to you)</span><span class="v2"><input id="pendClaims" type="number" value="${pending||''}" placeholder="0" style="width:120px;text-align:right" onchange="SI.setClaims(this.value)"></span></div>
+    <p class="caption muted">Salary is read from your DBS Multiplier (debit) credits. Pending reimbursements are claims you haven't submitted yet — recoverable cash that shrinks the gap once filed.</p></div>`;
   return h;
 }
 function closeGapHTML(){ const g=gapModel(); const {proj, baselineMo}=g;
@@ -432,7 +439,9 @@ function closeGapHTML(){ const g=gapModel(); const {proj, baselineMo}=g;
   ranked.forEach((l,i)=>h+=`<div class="lever"><div class="lvrank">${i+1}</div><div style="flex:1"><div><span class="chip" style="background:${TAGC[l.tag]}22;color:${TAGC[l.tag]}">${l.tag}</span> <b>${l.title}</b></div><div class="caption muted" style="margin-top:2px">${l.detail}</div></div><div style="text-align:right;white-space:nowrap"><div class="lvimpact">${l.tag==='buffer'?sgd0(l.impact):'+'+sgd0(l.impact)}</div><div class="caption muted">${l.tag==='trim'?'/yr':l.tag==='buffer'?'buffer':'freed'}</div>${l.btn}</div></div>`);
   return h+`</div>`;
 }
-async function setIncome(v){ const n=parseFloat(v); const o=(()=>{try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};}})(); if(isNaN(n))delete o.reliableMo; else o.reliableMo=n; localStorage.setItem('si_income',JSON.stringify(o)); insightsView(); }
+function readIncome(){ try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};} }
+async function setIncome(v){ const n=parseFloat(v); const o=readIncome(); if(isNaN(n))delete o.reliableMo; else o.reliableMo=n; localStorage.setItem('si_income',JSON.stringify(o)); insightsView(); }
+async function setClaims(v){ const n=parseFloat(v); const o=readIncome(); if(isNaN(n)||n===0)delete o.pendingClaims; else o.pendingClaims=n; localStorage.setItem('si_income',JSON.stringify(o)); insightsView(); }
 function insightsView(){
   let h=cashflowAnalysisHTML();
   h+=commitmentsSection();
@@ -1258,7 +1267,7 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 
 // expose handlers for inline onclick
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
-  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome,
+  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome, setClaims,
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, hide:toggleHidden, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
