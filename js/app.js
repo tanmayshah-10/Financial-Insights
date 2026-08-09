@@ -353,14 +353,17 @@ async function suggestCommit(){ const base=counted().filter(t=>pMatch(t)&&t.dire
     await reload(); render(); toast(ok?`Added ${ok} commitment(s) — review funding & dates.`:'Add failed — did you run schema-commitments.sql?'); });
 }
 // ---- funding gap: does reliable income cover the calendar, or do you dip into investments? ----
+const SALKEY=/SALARY|PAYROLL|WAGES|\bSAP\b|MONTHLY\s*SAL/i;
 function incomeModel(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='in'&&!NOFLOW.has(catOf(t)));
   const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
   const inflow=base.filter(t=>mset.has(t.txn_date.slice(0,7)));
-  const byM={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byM[k]=byM[k]||{amt:0,mo:new Set()});byM[k].amt+=toSGD(t.amount,t.currency);byM[k].mo.add(t.txn_date.slice(0,7));});
-  const src=Object.entries(byM).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size})).sort((a,b)=>b.amt-a.amt);
-  const salarySrc=src.find(s=>s.mos>=Math.max(2,N-1)&&s.amt/N>500);
+  const byM={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byM[k]=byM[k]||{amt:0,mo:new Set(),debit:false});byM[k].amt+=toSGD(t.amount,t.currency);byM[k].mo.add(t.txn_date.slice(0,7));if(t.account==='debit')byM[k].debit=true;});
+  const src=Object.entries(byM).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size,debit:v.debit})).sort((a,b)=>b.amt-a.amt);
+  const rec=s=>s.mos>=Math.max(2,N-1);
+  // salary lands as a recurring credit in the DBS Multiplier (debit) account — prefer that, then keyword, then largest recurring
+  const salarySrc = src.find(s=>SALKEY.test(s.k)&&rec(s)) || src.find(s=>s.debit&&rec(s)&&s.amt/N>1000) || src.find(s=>rec(s)&&s.amt/N>1000);
   const totIn=inflow.reduce((s,t)=>s+toSGD(t.amount,t.currency),0);
-  return {reliableMo: totIn/N, salaryMo:(salarySrc?salarySrc.amt:0)/N, N}; }
+  return {reliableMo: totIn/N, salaryMo:(salarySrc?salarySrc.amt:0)/N, salaryName:salarySrc?salarySrc.k:null, N}; }
 function spendBaselineMo(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
   const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
   const byCat={}; base.filter(t=>mset.has(t.txn_date.slice(0,7))).forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{amt:0,mo:new Set()});byCat[c].amt+=toSGD(t.amount,t.currency);byCat[c].mo.add(t.txn_date.slice(0,7));});
@@ -375,39 +378,66 @@ function svgCashLine(proj){ const W=680,H=210,padT=16,padB=30,padL=4;
     else if(p.bonusLump>0) s+=`<circle cx="${x(i).toFixed(1)}" cy="${(zY+11).toFixed(1)}" r="3" fill="#5DCAA5"/>`;
     s+=`<text x="${x(i).toFixed(1)}" y="${H-8}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MN[p.m-1]}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Projected reliable cash across the next 12 months">${s}</svg>`; }
-function fundingGapHTML(){ const im=incomeModel(); if(!im.reliableMo && !pf(M.commitments).length) return '';
+function gapModel(){ const im=incomeModel();
   const ov=(()=>{try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};}})();
   const reliableMo = ov.reliableMo!=null? +ov.reliableMo : im.reliableMo;
-  const baselineMo = spendBaselineMo();
-  const rows=commitmentCalendar();
-  const startCash = currentBalances().cash || 0;
+  const baselineMo = spendBaselineMo(), rows=commitmentCalendar(), startCash=currentBalances().cash||0;
   let cash=startCash;
   const proj=rows.map(r=>{ const lumps=r.items.filter(c=>c.cadence!=='monthly');
     const sum=f=>lumps.filter(c=>f.includes(c.funding||'salary')).reduce((s,c)=>s+toSGD(c.amount,c.currency),0);
     const selfFund=sum(['salary','other']), invLump=sum(['investments']), bonusLump=sum(['bonus']);
-    const net=reliableMo-baselineMo-selfFund; cash+=net; return {...r, selfFund, invLump, bonusLump, net, cash}; });
+    const net=reliableMo-baselineMo-selfFund; cash+=net; return {...r, lumps, selfFund, invLump, bonusLump, net, cash}; });
+  return {im, ov, reliableMo, baselineMo, rows, startCash, proj, override:ov.reliableMo!=null}; }
+function fundingGapHTML(){ const g=gapModel(); if(!g.reliableMo && !pf(M.commitments).length) return '';
+  const {proj, reliableMo, baselineMo, im, override}=g;
   const neg=proj.filter(p=>p.cash<0);
   const deepest=proj.reduce((m,p)=>p.cash<m.cash?p:m, proj[0]||{cash:0});
-  const plannedInv=proj.reduce((s,p)=>s+p.invLump,0), plannedBonus=proj.reduce((s,p)=>s+p.bonusLump,0);
-  const allLumps=rows.reduce((s,r)=>s+r.items.filter(c=>c.cadence!=='monthly').reduce((a,c)=>a+toSGD(c.amount,c.currency),0),0);
+  const plannedInv=proj.reduce((s,p)=>s+p.invLump,0);
+  const allLumps=g.rows.reduce((s,r)=>s+r.items.filter(c=>c.cadence!=='monthly').reduce((a,c)=>a+toSGD(c.amount,c.currency),0),0);
   const annualReliable=reliableMo*12, annualOut=baselineMo*12+allLumps;
   const selfObligations=baselineMo*12+proj.reduce((s,p)=>s+p.selfFund,0);
   let h=`<div class="card"><h2>Funding gap — will income cover the year?</h2>
-    <p class="caption muted" style="margin:-2px 0 12px">Running cash if funded by <b>reliable income only</b> (salary + steady income), starting from your cash on hand. Where the line dips below zero, that month needs a bonus or an investment sale.</p>
+    <p class="caption muted" style="margin:-2px 0 12px">Running cash if funded by <b>reliable income only</b>, from your cash on hand. Where the line dips below zero, that month needs a bonus or an investment sale.</p>
     <div class="kpis">${kpi('Reliable income',sgd0(annualReliable),'per year')}${kpi('Committed out',sgd0(annualOut),'baseline + lumps / yr')}${kpi('Reliable surplus',signed(annualReliable-selfObligations),(annualReliable-selfObligations)>=0?'covers its own':'short on its own',(annualReliable-selfObligations)>=0?'val-pos':'val-neg')}${kpi('Planned inv. draw',sgd0(plannedInv),'you earmarked')}</div>
     ${svgCashLine(proj)}
     <div class="liqleg" style="margin-top:6px"><span><i style="background:var(--pos)"></i>cash positive</span><span><i style="background:var(--neg)"></i>cash negative</span><span><i style="background:#5DCAA5"></i>bonus month</span><span><i style="background:#7F77DD"></i>planned inv. draw</span></div>`;
-  if(neg.length){ h+=`<div class="flag warn" style="margin-top:12px"><span class="ic2">⚠️</span><span>Reliable income runs short in <b>${neg.length} month(s)</b> — deepest at <b>${MN[deepest.m-1]} ${deepest.y}</b> (${sgd0(deepest.cash)}). That's the gap you're covering by selling investments right now. Earmark those months' lumps to <b>bonus</b> or <b>investments</b> so it's a plan, not a surprise.</span></div>`; }
-  else { h+=`<div class="flag good" style="margin-top:12px"><span class="ic2">✓</span><span>Reliable income stays positive all year (low point ${sgd0(deepest.cash)}). ${plannedInv?`Plus SGD ${kfmt(plannedInv)} of planned investment draws you chose.`:''}</span></div>`; }
-  h+=`<div class="drow" style="margin-top:12px"><span class="k">Reliable monthly income</span><span class="v2"><input id="incMo" type="number" value="${Math.round(reliableMo)}" style="width:120px;text-align:right" onchange="SI.setIncome(this.value)"> <span class="caption muted">${ov.reliableMo!=null?'override':'detected'}</span></span></div>
-    <p class="caption muted">Detected from your imported inflows. If salary lands in an account you haven't imported, set the real figure here.</p></div>`;
+  if(neg.length){ h+=`<div class="flag warn" style="margin-top:12px"><span class="ic2">⚠️</span><span>Reliable income runs short in <b>${neg.length} month(s)</b> — deepest at <b>${MN[deepest.m-1]} ${deepest.y}</b> (${sgd0(deepest.cash)}). That's the gap you're covering by selling investments right now.</span></div>`; }
+  else { h+=`<div class="flag good" style="margin-top:12px"><span class="ic2">✓</span><span>Reliable income stays positive all year (low point ${sgd0(deepest.cash)}). ${plannedInv?`Plus ${sgd0(plannedInv)} of planned investment draws.`:''}</span></div>`; }
+  h+=`<div class="drow" style="margin-top:12px"><span class="k">Reliable monthly income</span><span class="v2"><input id="incMo" type="number" value="${Math.round(reliableMo)}" style="width:120px;text-align:right" onchange="SI.setIncome(this.value)"> <span class="caption muted">${override?'override':(im.salaryName?'incl. salary “'+esc(im.salaryName)+'”':'detected')}</span></span></div>
+    <p class="caption muted">Salary is read from your DBS Multiplier (debit) credits. If it lands in an account you haven't imported, set the real figure here.</p></div>`;
   return h;
+}
+function closeGapHTML(){ const g=gapModel(); const {proj, baselineMo}=g;
+  const neg=proj.filter(p=>p.cash<0); if(!neg.length) return '';
+  const deepest=proj.reduce((m,p)=>p.cash<m.cash?p:m, proj[0]);
+  const levers=[];
+  // 1. re-fund salary-funded lumps sitting in shortfall months
+  proj.forEach(p=>{ if(p.cash<0) p.lumps.filter(c=>['salary','other'].includes(c.funding||'salary')).forEach(c=>{ const amt=toSGD(c.amount,c.currency);
+    levers.push({impact:amt, tag:'re-fund', title:`Fund “${esc(c.label)}” from bonus or investments`, detail:`${sgd0(amt)} in ${MN[p.m-1]} is drawing on salary in a shortfall month — earmark it so the dip is planned, not forced.`, btn:`<button class="btn sm" onclick="SI.editEntity('commitment','${c.id}')">Set funding</button>`}); }); });
+  // 2. re-time a lump from a red month to a nearby surplus month
+  proj.forEach((p,i)=>{ if(p.cash<0) p.lumps.filter(c=>c.cadence!=='monthly').forEach(c=>{ const amt=toSGD(c.amount,c.currency);
+    const alt=proj.find((q,j)=>Math.abs(j-i)<=2 && q.cash-amt>0); if(alt) levers.push({impact:amt*0.6, tag:'re-time', title:`Move “${esc(c.label)}” toward ${MN[alt.m-1]}`, detail:`Shifting this ${sgd0(amt)} lump a month or two eases the ${MN[p.m-1]} low without changing what you spend.`, btn:`<button class="btn sm" onclick="SI.editEntity('commitment','${c.id}')">Adjust dates</button>`}); }); });
+  // 3. trim discretionary baseline
+  const DISC=/dining|eating|shopping|travel|holiday|entertain|misc|subscription|lifestyle|leisure/i;
+  const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
+  const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
+  const byCat={}; base.filter(t=>mset.has(t.txn_date.slice(0,7))).forEach(t=>{const c=catOf(t);byCat[c]=(byCat[c]||0)+toSGD(t.amount,t.currency);});
+  Object.entries(byCat).filter(([c])=>DISC.test(c)).sort((a,b)=>b[1]-a[1]).slice(0,3).forEach(([c,v])=>{ const mo=v/N, save=mo*0.2*12; if(save>200)
+    levers.push({impact:save, tag:'trim', title:`Trim ${esc(c)} ~20%`, detail:`${sgd0(mo)}/mo now → about ${sgd0(save)}/yr back, lifting cash every month.`, btn:`<button class="btn sm" onclick="SI.drill('${enc(c)}')">See spend</button>`}); });
+  // 4. pre-fund the deepest dip
+  levers.push({impact:-deepest.cash, tag:'buffer', title:`Pre-fund ${sgd0(-deepest.cash)} before ${MN[deepest.m-1]}`, detail:`Peak shortfall is ${sgd0(deepest.cash)} at ${MN[deepest.m-1]} ${deepest.y}. Parking that in cash beforehand avoids selling investments at a bad moment.`, btn:''});
+  const seen=new Set(); const ranked=levers.filter(l=>{const k=l.title;if(seen.has(k))return false;seen.add(k);return true;}).sort((a,b)=>b.impact-a.impact).slice(0,6);
+  const TAGC={'re-fund':'#7F77DD','re-time':'#378ADD','trim':'#D85A30','buffer':'#EF9F27'};
+  let h=`<div class="card"><h2>Close the gap</h2><p class="caption muted" style="margin:-2px 0 12px">Levers ranked by impact on the shortfall. The first ones convert forced sales into a plan; the last ones actually shrink the outflow.</p>`;
+  ranked.forEach((l,i)=>h+=`<div class="lever"><div class="lvrank">${i+1}</div><div style="flex:1"><div><span class="chip" style="background:${TAGC[l.tag]}22;color:${TAGC[l.tag]}">${l.tag}</span> <b>${l.title}</b></div><div class="caption muted" style="margin-top:2px">${l.detail}</div></div><div style="text-align:right;white-space:nowrap"><div class="lvimpact">${l.tag==='buffer'?sgd0(l.impact):'+'+sgd0(l.impact)}</div><div class="caption muted">${l.tag==='trim'?'/yr':l.tag==='buffer'?'buffer':'freed'}</div>${l.btn}</div></div>`);
+  return h+`</div>`;
 }
 async function setIncome(v){ const n=parseFloat(v); const o=(()=>{try{return JSON.parse(localStorage.getItem('si_income')||'{}');}catch(e){return {};}})(); if(isNaN(n))delete o.reliableMo; else o.reliableMo=n; localStorage.setItem('si_income',JSON.stringify(o)); insightsView(); }
 function insightsView(){
   let h=cashflowAnalysisHTML();
   h+=commitmentsSection();
   h+=fundingGapHTML();
+  h+=closeGapHTML();
   const P=counted().filter(inScope).filter(isSpend);
   if(!P.length){$(mountEl()).innerHTML=h||'<div class="card"><div class="muted">No data yet — import statements to see your analysis.</div></div>';return;}
   const gross=P.reduce((s,t)=>s+t.amount,0);
