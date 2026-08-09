@@ -79,8 +79,13 @@ function parseDBScc(text){const L=text.split(/\r?\n/);const hi=L.findIndex(l=>/^
   return{rows:out,masked,skipped,confident:true};}
 
 function isDBSsavings(t){return /Transaction Date,Value Date,Statement Code/.test(deq(t));}
-function savingsCat(desc,code,dir){
-  if(dir==='in')return /INT/.test(code)?'Income (interest)':'Income';
+function savingsCat(desc,code,dir,amt){
+  if(dir==='in'){
+    if(/INT/.test(code))return 'Income (interest)';
+    // IBG SAP ASIA credits: ≥15k (paid ~20th) = salary; smaller = expense reimbursement
+    if(/SAP\s*ASIA|IBG\s*SAP/i.test(desc))return (amt!=null&&amt>=15000)?'Income':'Reimbursement';
+    return 'Income';
+  }
   if(/BILL DBSC|I-BANK|TOP-UP|PAYLAH|REVOLUT|PAYNOW|\bTRF\b|SI TO :UTMOST|\bICT\b/i.test(desc))return 'Transfer';
   if(/RENT/i.test(desc))return 'Rent';
   if(/IRAS|\bITX\b|FWLEVY|MANPOWER|INCOME TAX/i.test(desc))return 'Tax';
@@ -90,7 +95,7 @@ function parseDBSsavings(text){const L=text.split(/\r?\n/);const hi=L.findIndex(
   for(let i=hi+1;i<L.length;i++){if(!L[i].trim())continue;if(PAN.test(L[i]))masked++;PAN.lastIndex=0;
     const c=tokenize(L[i]);const date=pdate(c[0]),code=c[2]||'',desc=c[3]||'',debit=num(c[10]),credit=num(c[11]);
     if(!date){skipped++;continue;}let amt,dir;if(debit){amt=debit;dir='out';}else if(credit){amt=credit;dir='in';}else{skipped++;continue;}
-    out.push(mk({date,amount:amt,dir,refund:false,cat:savingsCat(desc,code,dir),desc,channel:'Other',fcy:false,mk:merchKey(desc),src:'dbs_sav'}));}
+    out.push(mk({date,amount:amt,dir,refund:false,cat:savingsCat(desc,code,dir,amt),desc,channel:'Other',fcy:false,mk:merchKey(desc),src:'dbs_sav'}));}
   return{rows:out,masked,skipped,confident:true};}
 
 function isRevolut(t){const h=t.split(/\r?\n/)[0]||'';return /Started Date/i.test(h)&&/Currency/i.test(h)&&/Amount/i.test(h);}

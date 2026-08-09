@@ -14,7 +14,7 @@ const DEFAULT_CATS = [
   ['Insurance','🛡️',false,false],['Healthcare','🩺',false,false],['Utilities/Telco','💡',false,false],
   ['Education','🎓',false,false],['Auto','🚗',false,false],['Rent','🏠',false,false],
   ['Tax','🏛️',false,false],['Bills/Other','📄',false,false],['Transfer','🔄',true,false],
-  ['Income','💰',true,false],['Income (interest)','💰',true,false],['Refund','↩️',true,false],
+  ['Income','💰',true,false],['Income (interest)','💰',true,false],['Reimbursement','🧾',false,false],['Refund','↩️',true,false],
   ['Uncategorized','❓',false,false],
 ];
 

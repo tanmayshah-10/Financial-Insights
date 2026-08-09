@@ -246,10 +246,9 @@ function cashflowAnalysisHTML(){
   const inflow=scoped.filter(isIn), totIn=inflow.reduce((s,t)=>s+t.amount,0);
   const byIn={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byIn[k]=byIn[k]||{amt:0,mo:new Set()});byIn[k].amt+=t.amount;byIn[k].mo.add(t.txn_date.slice(0,7));});
   const inSrc=Object.entries(byIn).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size})).sort((a,b)=>b.amt-a.amt);
-  const interest=inflow.filter(t=>catOf(t)==='Income (interest)').reduce((s,t)=>s+t.amount,0);
-  const salarySrc=inSrc.find(s=>s.mos>=Math.max(2,N-1)&&s.amt/N>500&&!CLAIMKEY.test(s.k)), salaryTot=salarySrc?salarySrc.amt:0;
-  const claims=inflow.filter(t=>{const k=merchOf(t)||catOf(t);return k!==(salarySrc?salarySrc.k:'')&&CLAIMKEY.test(k);}).reduce((s,t)=>s+t.amount,0);
-  const otherIn=totIn-salaryTot-interest-claims;
+  const icls={salary:0,claims:0,interest:0,other:0}; inflow.forEach(t=>icls[incomeClass(t)]+=t.amount);
+  const salaryTot=icls.salary, claims=icls.claims, interest=icls.interest, otherIn=icls.other;
+  const salTx=inflow.filter(t=>incomeClass(t)==='salary').sort((a,b)=>b.amount-a.amount)[0]; const salaryName=salTx?merchOf(salTx):null;
   // expenses: regular vs one-off
   const outflow=scoped.filter(isOut);
   const byCat={}; outflow.forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{amt:0,mo:{}});byCat[c].amt+=t.amount;byCat[c].mo[t.txn_date.slice(0,7)]=(byCat[c].mo[t.txn_date.slice(0,7)]||0)+t.amount;});
@@ -266,7 +265,7 @@ function cashflowAnalysisHTML(){
     <div class="liqleg" style="margin-top:6px"><span><i style="background:var(--pos)"></i>Money in</span><span><i style="background:var(--neg)"></i>Money out</span><span class="muted">net labelled per month</span></div></div>`;
   // income
   h+=`<div class="card"><h2>What's coming in</h2>
-    <div class="io"><div><div class="k">💼 Salary${salarySrc?' · '+esc(salarySrc.k):''}</div><div class="n">${sgd0(salaryTot/N)}</div></div>
+    <div class="io"><div><div class="k">💼 Salary${salaryName?' · '+esc(salaryName):''}</div><div class="n">${sgd0(salaryTot/N)}</div></div>
       <div><div class="k">🧾 SAP reimbursements / claims</div><div class="n">${sgd0(claims/N)}</div></div>
       <div><div class="k">↩️ Other income</div><div class="n">${sgd0(otherIn/N)}</div></div>
       <div><div class="k">💰 Interest</div><div class="n">${sgd0(interest/N)}</div></div></div>`;
@@ -357,16 +356,22 @@ async function suggestCommit(){ const base=counted().filter(t=>pMatch(t)&&t.dire
 // ---- funding gap: does reliable income cover the calendar, or do you dip into investments? ----
 const SALKEY=/SALARY|PAYROLL|WAGES|MONTHLY\s*SAL/i;      // NOT 'SAP' — SAP credits are expense claims, not salary
 const CLAIMKEY=/\bSAP\b|CLAIM|REIMBURS|EXPENSE/i;         // company reimbursements / incidentals
+const SALARY_MIN=15000;                                   // IBG SAP ASIA ≥ this = salary; smaller = reimbursement
+// classify one inflow: salary | claims | interest | other  (category wins, so manual re-assignment sticks)
+function incomeClass(t){ const amt=toSGD(t.amount,t.currency), k=merchOf(t)||'', c=catOf(t);
+  if(c==='Income (interest)') return 'interest';
+  if(c==='Reimbursement') return 'claims';
+  if(t.account==='debit' && amt>=SALARY_MIN) return 'salary';   // the ~monthly SAP salary
+  if(CLAIMKEY.test(k)) return 'claims';                          // smaller SAP / expense credits
+  if(SALKEY.test(k) && amt>=SALARY_MIN) return 'salary';
+  return 'other'; }
 function incomeModel(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='in'&&!NOFLOW.has(catOf(t)));
   const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
   const inflow=base.filter(t=>mset.has(t.txn_date.slice(0,7)));
-  const byM={}; inflow.forEach(t=>{const k=merchOf(t)||catOf(t);(byM[k]=byM[k]||{amt:0,mo:new Set(),debit:false});byM[k].amt+=toSGD(t.amount,t.currency);byM[k].mo.add(t.txn_date.slice(0,7));if(t.account==='debit')byM[k].debit=true;});
-  const src=Object.entries(byM).map(([k,v])=>({k,amt:v.amt,mos:v.mo.size,debit:v.debit})).sort((a,b)=>b.amt-a.amt);
-  const rec=s=>s.mos>=Math.max(2,N-1);
-  // salary lands as a recurring credit in the DBS Multiplier (debit) account — prefer that, then keyword, then largest recurring
-  const salarySrc = src.find(s=>SALKEY.test(s.k)&&rec(s)) || src.find(s=>s.debit&&rec(s)&&s.amt/N>1000) || src.find(s=>rec(s)&&s.amt/N>1000);
-  const totIn=inflow.reduce((s,t)=>s+toSGD(t.amount,t.currency),0);
-  return {reliableMo: totIn/N, salaryMo:(salarySrc?salarySrc.amt:0)/N, salaryName:salarySrc?salarySrc.k:null, N}; }
+  const by={salary:0,claims:0,interest:0,other:0}; inflow.forEach(t=>by[incomeClass(t)]+=toSGD(t.amount,t.currency));
+  const salTx=inflow.filter(t=>incomeClass(t)==='salary').sort((a,b)=>b.amount-a.amount)[0];
+  // reliable = salary + steady other + interest; claims excluded (variable & often delayed)
+  return {reliableMo:(by.salary+by.other+by.interest)/N, salaryMo:by.salary/N, claimsMo:by.claims/N, by, N, salaryName:salTx?merchOf(salTx):null}; }
 function spendBaselineMo(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
   const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
   const byCat={}; base.filter(t=>mset.has(t.txn_date.slice(0,7))).forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{amt:0,mo:new Set()});byCat[c].amt+=toSGD(t.amount,t.currency);byCat[c].mo.add(t.txn_date.slice(0,7));});
