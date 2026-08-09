@@ -15,7 +15,7 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 let M = { tx:[], cats:[], rules:{}, aliases:{}, files:new Set(), fileHashes:new Set(),
           holdings:[], policies:[], goals:[], realEstate:[], cashAccounts:[], liabilities:[],
-          snapshots:[], tags:[], accounts:[], valuations:[], positions:[], fx:{}, balances:{}, tax:null, estate:null };
+          snapshots:[], tags:[], accounts:[], valuations:[], positions:[], commitments:[], fx:{}, balances:{}, tax:null, estate:null };
 // Yahoo symbol from (symbol, exchange)
 function ysym(symbol,exchange){ symbol=(symbol||'').toUpperCase().trim(); const ex=(exchange||'').toUpperCase();
   if(ex==='CRYPTO') return symbol.includes('-')?symbol:symbol+'-USD';
@@ -285,8 +285,76 @@ function cashflowAnalysisHTML(){
     bigs.forEach(t=>h+=`<tr onclick="SI.open('${t.id}')" style="cursor:pointer"><td style="white-space:nowrap">${dfull(t.txn_date)}</td><td>${esc(merchOf(t))}</td><td>${catOf(t)}</td><td class="num">${sgd0(t.amount)}</td></tr>`);h+=`</tbody></table></div>`;}
   return h;
 }
+// ---- commitments: calendar + flexible funding ----
+const FUND={salary:'Salary (monthly)',bonus:'Bonus (periodic)',investments:'Investments',other:'Other income'};
+const FUNDC={salary:'#1D9E75',bonus:'#5DCAA5',investments:'#7F77DD',other:'#B4B2A9'};
+function nextMonths(n){ const d=new Date(),out=[]; for(let i=0;i<n;i++){ const m=new Date(d.getFullYear(),d.getMonth()+i,1); out.push({y:m.getFullYear(),m:m.getMonth()+1}); } return out; }
+function occursIn(c,y,m){ const mm=Array.isArray(c.months)?c.months.map(Number):[];
+  if(c.cadence==='monthly') return true;
+  if(c.due_date){ const p=c.due_date.split('-').map(Number); return p[0]===y&&p[1]===m; }
+  return mm.includes(m); }
+function cadenceLabel(c){ const mm=Array.isArray(c.months)?c.months:[]; if(c.cadence==='monthly')return 'every month'; if(c.due_date)return dfull(c.due_date); if(mm.length)return `${c.cadence} · ${mm.map(x=>MN[x-1]).join(', ')}`; return c.cadence||'—'; }
+function commitmentCalendar(){ const cs=pf(M.commitments).filter(c=>c.active!==false);
+  return nextMonths(12).map(w=>{ const items=cs.filter(c=>occursIn(c,w.y,w.m)); return {...w, items, total:items.reduce((s,c)=>s+toSGD(c.amount,c.currency),0)}; }); }
+function calendarHTML(rows){ const max=Math.max(1,...rows.map(r=>r.total));
+  return `<div class="calstrip">${rows.map(r=>{ const base=r.items.filter(c=>c.cadence==='monthly').reduce((s,c)=>s+toSGD(c.amount,c.currency),0); const lump=r.total-base;
+    const bh=Math.round(r.total/max*84), lh=Math.round(lump/max*84);
+    return `<div class="calcol" title="${MN[r.m-1]} ${r.y}: ${sgd0(r.total)}"><div class="calamt">${lump>0?kfmt(lump):''}</div><div class="calbar" style="height:${bh}px"><div class="callump" style="height:${lh}px"></div></div><div class="callbl">${MN[r.m-1]}${r.m===1?'·'+String(r.y).slice(2):''}</div></div>`; }).join('')}</div>`; }
+function fundingFlows(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
+  const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort().slice(-12); const N=months.length||1; const mset=new Set(months);
+  const byCat={}; base.filter(t=>mset.has(t.txn_date.slice(0,7))).forEach(t=>{const c=catOf(t);byCat[c]=(byCat[c]||0)+toSGD(t.amount,t.currency);});
+  let cats=Object.entries(byCat).map(([c,v])=>[c,v*(12/N)]).sort((a,b)=>b[1]-a[1]);
+  if(cats.length>8){ const rest=cats.slice(8).reduce((s,x)=>s+x[1],0); cats=cats.slice(0,8); cats.push(['Other',rest]); }
+  const fundByCat={}; pf(M.commitments).forEach(c=>{ if(c.category&&!fundByCat[c.category]) fundByCat[c.category]=c.funding||'salary'; });
+  const flows={}; cats.forEach(([cat,amt])=>{ const f=fundByCat[cat]||'salary'; (flows[f]=flows[f]||{})[cat]=amt; });
+  return {flows}; }
+function sankeySVG(flows){ const funds=Object.keys(flows).filter(f=>Object.keys(flows[f]).length);
+  if(!funds.length) return `<div class="caption muted">Import spend, then assign a “funded from” source to commitments to shape this map.</div>`;
+  const catTot={}; funds.forEach(f=>Object.entries(flows[f]).forEach(([c,v])=>catTot[c]=(catTot[c]||0)+v));
+  const cats=Object.keys(catTot).sort((a,b)=>catTot[b]-catTot[a]);
+  const total=Object.values(catTot).reduce((a,b)=>a+b,0)||1;
+  const fundTot={}; funds.forEach(f=>fundTot[f]=Object.values(flows[f]).reduce((a,b)=>a+b,0));
+  const W=680,gap=10,padT=6,H=Math.max(210,cats.length*30+20),lx=4,lw=13,rx=W-13,rw=13,x1=lx+lw,x2=rx,midx=W/2;
+  const scale=(H-padT*2-gap*(Math.max(funds.length,cats.length)-1))/total;
+  const L={}; let ly=padT+((H-padT*2)-(total*scale+gap*(funds.length-1)))/2; funds.forEach(f=>{const h=fundTot[f]*scale;L[f]={y:ly,h,cur:ly};ly+=h+gap;});
+  const R={}; let ry=padT+((H-padT*2)-(total*scale+gap*(cats.length-1)))/2; cats.forEach(c=>{const h=catTot[c]*scale;R[c]={y:ry,h,cur:ry};ry+=h+gap;});
+  let s='';
+  funds.forEach(f=>{ s+=`<rect x="${lx}" y="${L[f].y.toFixed(1)}" width="${lw}" height="${L[f].h.toFixed(1)}" rx="2" fill="${FUNDC[f]||'#888'}"/><text x="${x1+6}" y="${(L[f].y+L[f].h/2+4).toFixed(1)}" font-size="12" fill="var(--ink-2)">${FUND[f]||f}</text>`; });
+  cats.forEach(c=>{ s+=`<rect x="${rx}" y="${R[c].y.toFixed(1)}" width="${rw}" height="${R[c].h.toFixed(1)}" rx="2" fill="var(--ink-3)"/><text x="${x2-6}" y="${(R[c].y+R[c].h/2+4).toFixed(1)}" font-size="12" fill="var(--ink-2)" text-anchor="end">${esc(c)}</text>`; });
+  funds.forEach(f=>{ Object.entries(flows[f]).sort((a,b)=>b[1]-a[1]).forEach(([c,v])=>{ const h=v*scale, y0=L[f].cur, yr=R[c].cur; L[f].cur+=h; R[c].cur+=h;
+    s+=`<path d="M${x1},${y0.toFixed(1)} C${midx},${y0.toFixed(1)} ${midx},${yr.toFixed(1)} ${x2},${yr.toFixed(1)} L${x2},${(yr+h).toFixed(1)} C${midx},${(yr+h).toFixed(1)} ${midx},${(y0+h).toFixed(1)} ${x1},${(y0+h).toFixed(1)} Z" fill="${FUNDC[f]||'#888'}" opacity="0.25"/>`; }); });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="Funding source to category flow">${s}</svg>`; }
+function commitmentsSection(){ const cs=pf(M.commitments);
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Commitments &amp; funding</h2>
+    <div style="display:flex;gap:8px"><button class="btn sm" onclick="SI.suggestCommit()">Suggest from history</button><button class="btn sm pri" onclick="SI.addEntity('commitment')">+ Add</button></div></div>`;
+  if(!cs.length){ return h+`<div class="flag info" style="margin-top:10px"><span class="ic2">🗓️</span><span>No commitments yet. <b>Suggest from history</b> reads your recurring &amp; periodic payments from imported statements, or <b>+ Add</b> an upcoming one (e.g. a holiday). Then set how each is funded — salary, bonus, or by liquidating investments.</span></div></div>`; }
+  const rows=commitmentCalendar();
+  const soon=rows.slice(0,2).flatMap(r=>r.items.filter(c=>c.cadence!=='monthly').map(c=>({c,r})));
+  if(soon.length){ h+=`<div style="margin-top:12px">${soon.map(({c,r})=>`<div class="flag warn"><span class="ic2">⏰</span><span>Plan ahead — <b>${esc(c.label)}</b> ~${sgd0(toSGD(c.amount,c.currency))} due around <b>${MN[r.m-1]} ${r.y}</b>, funded from ${FUND[c.funding]||c.funding}.</span></div>`).join('')}</div>`; }
+  h+=`<h3 style="margin:16px 0 8px">Next 12 months — plan 2 months ahead</h3>${calendarHTML(rows)}`;
+  h+=`<h3 style="margin:20px 0 6px">Where each category is funded from</h3>${sankeySVG(fundingFlows().flows)}
+    <div class="liqleg" style="margin-top:6px">${Object.entries(FUND).map(([k,l])=>`<span><i style="background:${FUNDC[k]}"></i>${l}</span>`).join('')}</div>`;
+  h+=`<h3 style="margin:20px 0 6px">All commitments</h3><table><thead><tr><th>What</th><th>Category</th><th class="num">Amount</th><th>When</th><th>Funded from</th></tr></thead><tbody>`;
+  cs.slice().sort((a,b)=>toSGD(b.amount,b.currency)-toSGD(a.amount,a.currency)).forEach(c=>h+=`<tr onclick="SI.editEntity('commitment','${c.id}')" style="cursor:pointer"><td>${esc(c.label)}${c.source==='auto'?' <span class="chip">auto</span>':''}</td><td>${esc(c.category||'—')}</td><td class="num">${sgd0(toSGD(c.amount,c.currency))}</td><td class="caption">${cadenceLabel(c)}</td><td class="caption">${FUND[c.funding]||c.funding}</td></tr>`);
+  return h+`</tbody></table></div>`;
+}
+async function suggestCommit(){ const base=counted().filter(t=>pMatch(t)&&t.direction==='out'&&!nonspendSet().has(catOf(t)));
+  if(!base.length){ toast('Import statements first.'); return; }
+  const months=[...new Set(base.map(t=>t.txn_date.slice(0,7)))].sort(); const N=months.length;
+  const byCat={}; base.forEach(t=>{const c=catOf(t);(byCat[c]=byCat[c]||{mo:{},tot:0});byCat[c].tot+=toSGD(t.amount,t.currency);const k=t.txn_date.slice(0,7);byCat[c].mo[k]=(byCat[c].mo[k]||0)+toSGD(t.amount,t.currency);});
+  const existing=new Set(pf(M.commitments).map(c=>(c.category||'').toLowerCase()));
+  const add=[];
+  Object.entries(byCat).forEach(([cat,v])=>{ if(existing.has(cat.toLowerCase()))return; const mp=Object.keys(v.mo).length; const um=[...new Set(Object.keys(v.mo).map(k=>+k.slice(5,7)))];
+    if(mp>=Math.max(2,Math.ceil(N*0.6))) add.push({label:`${cat} (monthly)`,category:cat,amount:Math.round(v.tot/N),cadence:'monthly',months:[],funding:'salary',source:'auto'});
+    else add.push({label:cat,category:cat,amount:Math.round(v.tot/mp),cadence:mp<=1?'yearly':mp<=2?'half-yearly':'quarterly',months:um,funding:'salary',source:'auto'}); });
+  if(!add.length){ toast('Nothing new to suggest — commitments already cover your categories.'); return; }
+  confirmSheet(`Add ${add.length} suggested commitment(s) from your history? Each is editable — set the funding source and adjust dates after.`, async()=>{
+    let ok=0; for(const c of add){ try{ await db.insertOne('commitments',{...c,currency:'SGD',owner:profile==='household'?'joint':profile}); ok++; }catch(e){} }
+    await reload(); render(); toast(ok?`Added ${ok} commitment(s) — review funding & dates.`:'Add failed — did you run schema-commitments.sql?'); });
+}
 function insightsView(){
   let h=cashflowAnalysisHTML();
+  h+=commitmentsSection();
   const P=counted().filter(inScope).filter(isSpend);
   if(!P.length){$(mountEl()).innerHTML=h||'<div class="card"><div class="muted">No data yet — import statements to see your analysis.</div></div>';return;}
   const gross=P.reduce((s,t)=>s+t.amount,0);
@@ -520,6 +588,8 @@ function fld(f,val){ val=val==null?'':val;
   if(f.t==='ccy') return `<select id="ed_${f.k}">${CCYS.map(c=>`<option ${c===(val||'SGD')?'selected':''}>${c}</option>`).join('')}</select>`;
   if(f.t==='owner') return `<select id="ed_${f.k}">${OWNERS.map(([o,l])=>`<option value="${o}" ${o===(val||'tanmay')?'selected':''}>${l}</option>`).join('')}</select>`;
   if(f.t==='select') return `<select id="ed_${f.k}">${f.opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select>`;
+  if(f.t==='cat') return `<select id="ed_${f.k}">${['',...catList()].map(c=>`<option ${c===val?'selected':''}>${c}</option>`).join('')}</select>`;
+  if(f.t==='months'){ const sel=Array.isArray(val)?val.map(Number):[]; return `<span id="ed_${f.k}" style="display:inline-flex;flex-wrap:wrap;gap:3px;max-width:220px;justify-content:flex-end">${MN.map((m,i)=>`<label class="mchip"><input type="checkbox" value="${i+1}" ${sel.includes(i+1)?'checked':''} style="display:none"><span>${m}</span></label>`).join('')}</span>`; }
   return `<input id="ed_${f.k}" type="${f.t}" value="${esc(String(val))}" style="width:160px${f.t==='number'?';text-align:right':''}">`;
 }
 const EDITORS={
@@ -544,6 +614,15 @@ const EDITORS={
     {k:'exchange',l:'Exchange',t:'select',opts:['US','NSE','BSE','SGX','CRYPTO']},
     {k:'quantity',l:'Quantity',t:'number'},{k:'cost_basis',l:'Cost basis (total)',t:'number'},
     {k:'currency',l:'Currency',t:'ccy'},{k:'label',l:'Label (optional)',t:'text'},{k:'owner',l:'Owner',t:'owner'}]},
+  commitment:{table:'commitments',coll:'commitments',title:'Commitment',nameKey:'label',fields:[
+    {k:'label',l:'What (e.g. School fees, Holiday)',t:'text'},
+    {k:'category',l:'Category',t:'cat'},
+    {k:'amount',l:'Typical amount / occurrence',t:'number'},{k:'currency',l:'Currency',t:'ccy'},
+    {k:'cadence',l:'How often',t:'select',opts:['monthly','quarterly','half-yearly','yearly','one-off']},
+    {k:'months',l:'Typical month(s)',t:'months'},
+    {k:'due_date',l:'Exact date (one-offs)',t:'date'},
+    {k:'funding',l:'Funded from',t:'select',opts:['salary','bonus','investments','other']},
+    {k:'owner',l:'Owner',t:'owner'},{k:'notes',l:'Notes',t:'text'}]},
 };
 function openEditor(type,id){ const spec=EDITORS[type]; const row= id?M[spec.coll].find(x=>x.id===id):{};
   $('#sheet').innerHTML=`<button class="x" onclick="SI.close()">✕</button><h3>${id?'Edit':'Add'} ${spec.title.toLowerCase()}</h3>
@@ -554,7 +633,9 @@ function openEditor(type,id){ const spec=EDITORS[type]; const row= id?M[spec.col
   $('#ov').classList.add('show');
 }
 async function saveEditor(type,id){ const spec=EDITORS[type]; const patch={};
-  spec.fields.forEach(f=>{ let v=$('#ed_'+f.k)?.value; if(f.t==='number') v=(v===''?null:parseFloat(v)); else if(v==='') v=null; patch[f.k]=v; });
+  spec.fields.forEach(f=>{
+    if(f.t==='months'){ const box=$('#ed_'+f.k); patch[f.k]=box?[...box.querySelectorAll('input:checked')].map(c=>+c.value):[]; return; }
+    let v=$('#ed_'+f.k)?.value; if(f.t==='number') v=(v===''?null:parseFloat(v)); else if(v==='') v=null; patch[f.k]=v; });
   if(spec.fields.some(f=>f.k==='as_of') && !patch.as_of) patch.as_of=today();
   if(!id){ const nm=(patch[spec.nameKey]||'').toString().toLowerCase();
     const dup=M[spec.coll].find(x=>(x[spec.nameKey]||'').toString().toLowerCase()===nm && x.owner===patch.owner && nm);
@@ -1094,7 +1175,7 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 
 // expose handlers for inline onclick
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
-  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();},
+  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit,
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, hide:toggleHidden, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,

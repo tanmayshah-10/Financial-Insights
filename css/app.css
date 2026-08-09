@@ -143,6 +143,14 @@ tr:last-child td{border-bottom:none}
 .liqbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface-sunken);margin:6px 0 12px}.liqbar span{display:block;height:100%}
 .liqleg{display:flex;flex-wrap:wrap;gap:14px;font-size:13px}.liqleg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .liqtag{font-weight:600;white-space:nowrap}
+.mchip{cursor:pointer}.mchip span{display:inline-block;padding:3px 7px;border-radius:6px;background:var(--surface-sunken);color:var(--ink-2);font-size:12px}
+.mchip input:checked+span{background:var(--accent);color:#fff}
+.calstrip{display:grid;grid-template-columns:repeat(12,1fr);gap:6px;align-items:end}
+.calcol{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-height:118px}
+.calcol .calamt{font-size:10px;color:#c67c12;height:12px}
+.calbar{width:60%;min-height:2px;background:#B5D4F4;border-radius:3px 3px 0 0;display:flex;flex-direction:column;justify-content:flex-start;overflow:hidden}
+.callump{width:100%;background:#e8a13a}
+.callbl{font-size:11px;color:var(--ink-3);text-align:center}
 .catrow,.txrow{display:flex;align-items:center;gap:13px;padding:12px 4px;border-bottom:1px solid var(--hairline);cursor:pointer}
 .catrow:last-child,.txrow:last-child{border-bottom:none}
 .catrow:hover,.txrow:hover{background:var(--surface-sunken);border-radius:var(--r-sm)}
