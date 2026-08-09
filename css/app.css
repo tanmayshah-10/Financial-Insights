@@ -161,8 +161,18 @@ tr:last-child td{border-bottom:none}
 .ic{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex:none;position:relative;background:var(--surface-sunken)}
 .acctdot{position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--surface)}
 .catrow .nm,.txrow .nm{flex:1;min-width:0}.catrow .nm{font-weight:500}
-.txrow .nm .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.txrow .nm .s{font-size:12px;color:var(--ink-3)}
+.txrow .nm .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.txrow .nm .s{font-size:12px;color:var(--ink-3);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .am{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* credit = dark green, debit = blood red — strong + row accent */
+.txrow{border-left:3px solid transparent;padding-left:9px}
+.txrow.cr{border-left-color:var(--pos)}.txrow.db{border-left-color:var(--neg)}
+.txrow.cr .am{color:var(--pos)}.txrow.db .am{color:var(--neg)}
+.catpill{display:inline-block;background:var(--accent-tint);color:var(--ink);padding:2px 9px;border-radius:var(--r-pill);font-size:12px;font-weight:500;white-space:nowrap}
+.fcpill{display:inline-block;background:#fbf0dd;color:#9a5b00;padding:2px 8px;border-radius:var(--r-pill);font-size:11px;font-weight:500}
+.rvwpill{display:inline-block;background:var(--surface-sunken);color:var(--warn);padding:2px 8px;border-radius:var(--r-pill);font-size:11px}
+.dirseg button.cr{color:var(--pos)}.dirseg button.db{color:var(--neg)}
+.dirseg button.cr.on{background:var(--pos);color:#fff}.dirseg button.db.on{background:var(--neg);color:#fff}
+.txtot{display:flex;gap:18px;align-items:center;font-size:13px;padding:2px 4px 12px;flex-wrap:wrap}.txtot .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
 .chev{color:var(--ink-3);font-size:18px;margin-left:6px}
 .daygroup{font-size:12px;font-weight:600;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em;padding:14px 4px 4px}
 .flag{background:var(--surface-sunken);border-radius:var(--r-sm);padding:12px 14px;margin:8px 0;font-size:15px;display:flex;gap:10px;align-items:flex-start}

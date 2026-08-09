@@ -23,7 +23,7 @@ function ysym(symbol,exchange){ symbol=(symbol||'').toUpperCase().trim(); const 
   return symbol; }
 let catIcon={}, catFlags={}, HHID=null;
 let AREA='home', profile='tanmay';
-let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='', anWin=6;
+let TAB='overview', acct='all', month='all', txSearch='', txFlag='all', drillCat='', anWin=6, txDir='all', txSort='date';
 // ---- balance-sheet / money helpers ----
 const toSGD=(a,c)=>NW.toSGD(a,c,M.fx);
 // abbreviated currency: SGD 1.34M / 933K / 940
@@ -500,24 +500,30 @@ function svgInOut(ms){const keys=Object.keys(ms).sort();if(!keys.length)return '
     s+=`<rect x="${cx-bw-2}" y="${H-pad-ih}" width="${bw}" height="${ih}" rx="3" fill="var(--pos)"/><rect x="${cx+2}" y="${H-pad-oh}" width="${bw}" height="${oh}" rx="3" fill="var(--neg)"/><text x="${cx}" y="${H-9}" fill="var(--ink-3)" font-size="11" text-anchor="middle">${MN[+k.slice(5,7)-1]}</text>`;});
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:200px">${s}</svg>`;}
 
-function txRow(t){const sign=t.direction==='in'?'+':'-';const A=ACCT(t.account);const col=t.direction==='in'?'var(--pos)':'var(--txt)';const cat=catOf(t);const flg=(t.hidden?'🙈 ':'')+(t.pin?'📌 ':t.flag==='wrong'?'⚠️ ':t.flag==='duplicate'?'⧉ ':t.flag==='refund'?'⏳ ':'');
-  return `<div class="txrow" onclick="SI.open('${t.id}')"><div class="ic" style="background:${A.bg}">${ic(cat)}<span class="acctdot" style="background:${A.color}"></span></div>
-    <div class="nm"><div class="t">${flg}${esc(merchOf(t))}</div><div class="s">${cat}${!t.hidden&&t.fcy?` · <span style="color:#9a5b00">${t.fcy_cur} ${t.fcy_amt?(+t.fcy_amt).toLocaleString():''}</span>`:''}${t.review?' · review':''}</div></div>
-    <div class="am" style="color:${col}">${sign}${money0(t.amount)}</div><div class="chev">›</div></div>`;}
+function txRow(t){const inn=t.direction==='in';const sign=inn?'+':'−';const A=ACCT(t.account);const cat=catOf(t);const flg=(t.hidden?'🙈 ':'')+(t.pin?'📌 ':t.flag==='wrong'?'⚠️ ':t.flag==='duplicate'?'⧉ ':t.flag==='refund'?'⏳ ':'');
+  return `<div class="txrow ${inn?'cr':'db'}" onclick="SI.open('${t.id}')"><div class="ic" style="background:${A.bg}">${ic(cat)}<span class="acctdot" style="background:${A.color}"></span></div>
+    <div class="nm"><div class="t">${flg}${esc(merchOf(t))}</div><div class="s"><span class="catpill">${ic(cat)} ${esc(cat)}</span>${!t.hidden&&t.fcy?` <span class="fcpill">${t.fcy_cur} ${t.fcy_amt?(+t.fcy_amt).toLocaleString():''}</span>`:''}${t.review?' <span class="rvwpill">review</span>':''}</div></div>
+    <div class="am">${sign}${money0(t.amount)}</div><div class="chev">›</div></div>`;}
 
 function txView(){
   let rows=counted().filter(inScope);
   if(drillCat)rows=rows.filter(t=>catOf(t)===drillCat);
+  if(txDir!=='all')rows=rows.filter(t=>t.direction===txDir);
   if(txSearch)rows=rows.filter(t=>(t.hidden?'hidden others':((t.merchant||'')+' '+(t.raw||'')+' '+t.category)).toLowerCase().includes(txSearch));
   if(txFlag==='pin')rows=rows.filter(t=>t.pin);else if(txFlag!=='all')rows=rows.filter(t=>t.flag===txFlag);
-  rows.sort((a,b)=>b.txn_date.localeCompare(a.txn_date));
+  const byAmount = txSort==='amount';
+  rows.sort(byAmount ? (a,b)=>b.amount-a.amount : (a,b)=>b.txn_date.localeCompare(a.txn_date));
+  const inTot=rows.filter(t=>t.direction==='in').reduce((s,t)=>s+t.amount,0), outTot=rows.filter(t=>t.direction==='out').reduce((s,t)=>s+t.amount,0);
   let h=`<div class="card"><div class="filters"><select onchange="SI.setAcct(this.value)">${acctOpts()}</select><select onchange="SI.setMonth(this.value)">${monthOpts()}</select>
-    <input placeholder="Search" value="${esc(txSearch)}" oninput="SI.search(this.value)" style="flex:1;min-width:150px">
-    <div class="seg">${['all','pin','wrong','duplicate','refund'].map(f=>`<button class="${txFlag===f?'on':''}" onclick="SI.flag('${f}')">${({all:'All',pin:'📌',wrong:'⚠️',duplicate:'⧉',refund:'⏳'})[f]}</button>`).join('')}</div></div>`;
-  if(drillCat)h+=`<div style="margin-bottom:10px"><span class="chip">${ic(drillCat)} ${drillCat} <span style="cursor:pointer" onclick="SI.drill('')">✕</span></span></div>`;
-  let last='';rows.slice(0,300).forEach(t=>{if(t.txn_date!==last){h+=`<div class="daygroup">${dfull(t.txn_date)}</div>`;last=t.txn_date;}h+=txRow(t);});
+    <input placeholder="Search" value="${esc(txSearch)}" oninput="SI.search(this.value)" style="flex:1;min-width:140px">
+    <div class="seg dirseg"><button class="${txDir==='all'?'on':''}" onclick="SI.txdir('all')">All</button><button class="cr ${txDir==='in'?'on':''}" onclick="SI.txdir('in')">Credit</button><button class="db ${txDir==='out'?'on':''}" onclick="SI.txdir('out')">Debit</button></div>
+    <div class="seg"><button class="${txSort==='date'?'on':''}" onclick="SI.txsort('date')">Newest</button><button class="${txSort==='amount'?'on':''}" onclick="SI.txsort('amount')">Largest</button></div>
+    <div class="seg">${['all','pin','wrong','duplicate','refund'].map(f=>`<button class="${txFlag===f?'on':''}" onclick="SI.flag('${f}')">${({all:'⚑',pin:'📌',wrong:'⚠️',duplicate:'⧉',refund:'⏳'})[f]}</button>`).join('')}</div></div>
+    <div class="txtot"><span><span class="dot" style="background:var(--pos)"></span>Credit <b style="color:var(--pos)">${money0(inTot)}</b></span><span><span class="dot" style="background:var(--neg)"></span>Debit <b style="color:var(--neg)">${money0(outTot)}</b></span><span class="muted">${rows.length} txns</span></div>`;
+  if(drillCat)h+=`<div style="margin:10px 0"><span class="chip">${ic(drillCat)} ${drillCat} <span style="cursor:pointer" onclick="SI.drill('')">✕</span></span></div>`;
+  let last='';rows.slice(0,300).forEach(t=>{ if(!byAmount && t.txn_date!==last){h+=`<div class="daygroup">${dfull(t.txn_date)}</div>`;last=t.txn_date;} h+=txRow(t);});
   if(!rows.length)h+=`<div class="muted" style="padding:20px 0">No transactions match.</div>`;
-  if(rows.length>300)h+=`<div class="muted" style="margin-top:10px">Showing 300 of ${rows.length}.</div>`;
+  if(rows.length>300)h+=`<div class="muted" style="margin-top:10px">Showing 300 of ${rows.length}${byAmount?' (largest first)':''}.</div>`;
   h+=`</div>`;$(mountEl()).innerHTML=h;
 }
 
@@ -1272,7 +1278,7 @@ const enc=s=>String(s).replace(/'/g,"\\'");
 
 // expose handlers for inline onclick
 window.SI={ go, signIn, signOut:()=>signOut().then(()=>location.reload()),
-  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome, setClaims,
+  setAcct:v=>{acct=v;render();}, setMonth:v=>{month=v;render();}, search:v=>{txSearch=v.toLowerCase();txView();}, flag:v=>{txFlag=v;txView();}, txdir:v=>{txDir=v;txView();}, txsort:v=>{txSort=v;txView();}, drill:c=>{drillCat=c;go('transactions');}, anWin:n=>{anWin=n;insightsView();}, suggestCommit, setIncome, setClaims,
   open:openSheet, close:closeSheet, setCat, addCat:addCatAssign, toggle:toggleFlag, hide:toggleHidden, del, approve, approveAll, deleteReview, clearAll,
   connect:connectFolder, scan:scanDelta, manageCats:openCatManager, saveCats:saveCatManager, routeTx, routeCat,
   setProfile, theme:toggleTheme, importV3File, importV3Paste, exportCsv:exportCSV,
